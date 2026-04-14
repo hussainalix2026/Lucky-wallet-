@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and balance information",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "balance": { "type": "number" },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "referralCount": { "type": "integer" },
+        "hasReceivedReferralBonus": { "type": "boolean" },
+        "bankDetails": {
+          "type": "object",
+          "properties": {
+            "accountHolderName": { "type": "string" },
+            "accountNumber": { "type": "string" },
+            "ifscCode": { "type": "string" },
+            "upiId": { "type": "string" }
+          }
+        },
+        "isAdmin": { "type": "boolean" }
+      },
+      "required": ["fullName", "phoneNumber", "balance", "referralCode", "referralCount"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Wallet transaction records",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["Deposit", "Winning", "Withdraw", "Referral Bonus"] },
+        "status": { "type": "string", "enum": ["Pending", "Success", "Rejected"] },
+        "utr": { "type": "string" },
+        "screenshot": { "type": "string" },
+        "reason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "amount", "type", "status", "createdAt"]
+    },
+    "PaymentVerification": {
+      "title": "PaymentVerification",
+      "description": "Manual payment proof submissions",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "utr": { "type": "string" },
+        "purchaseNumber": { "type": "string" },
+        "screenshot": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "userEmail": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "utr", "screenshot", "status", "createdAt"]
+    },
+    "PurchasedNumber": {
+      "title": "PurchasedNumber",
+      "description": "Records of numbers purchased by users",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "number": { "type": "integer" },
+        "amount": { "type": "number" },
+        "winningAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Won", "Lost"] },
+        "drawDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "number", "amount", "status", "drawDate", "createdAt"]
+    },
+    "Result": {
+      "title": "Result",
+      "description": "Daily winning numbers",
+      "type": "object",
+      "properties": {
+        "number": { "type": "integer" },
+        "drawDate": { "type": "string" },
+        "winnersCount": { "type": "integer" },
+        "totalPayout": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["number", "drawDate", "createdAt"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings and limits",
+      "type": "object",
+      "properties": {
+        "withdrawalLimits": {
+          "type": "object",
+          "properties": {
+            "daily": { "type": "number" },
+            "weekly": { "type": "number" },
+            "monthly": { "type": "number" }
+          }
+        },
+        "referralBonus": {
+          "type": "object",
+          "properties": {
+            "referrer": { "type": "number" },
+            "referee": { "type": "number" }
+          }
+        }
+      }
+    },
+    "LudoGame": {
+      "title": "LudoGame",
+      "description": "Real-time Ludo game state",
+      "type": "object",
+      "properties": {
+        "players": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uid": { "type": "string" },
+              "color": { "type": "string", "enum": ["red", "blue", "yellow", "green"] },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" },
+              "color": { "type": "string" },
+              "position": { "type": "integer" }
+            }
+          }
+        },
+        "currentPlayer": { "type": "string" },
+        "diceValue": { "type": "integer" },
+        "status": { "type": "string", "enum": ["waiting", "playing", "finished"] },
+        "winner": { "type": "string" },
+        "entryFee": { "type": "number" },
+        "prizePool": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastMoveAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["players", "pieces", "currentPlayer", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Wallet transactions"
+    },
+    "/purchasedNumbers/{purchaseId}": {
+      "schema": "PurchasedNumber",
+      "description": "User number purchases"
+    },
+    "/results/{resultId}": {
+      "schema": "Result",
+      "description": "Daily draw results"
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Global settings"
+    },
+    "/paymentVerifications/{verificationId}": {
+      "schema": "PaymentVerification",
+      "description": "Manual payment proof submissions"
+    },
+    "/ludoGames/{gameId}": {
+      "schema": "LudoGame",
+      "description": "Real-time Ludo games"
+    }
+  }
+}
