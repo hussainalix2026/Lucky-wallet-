@@ -11,6 +11,7 @@ import RazorpayPayment from './RazorpayPayment';
 interface WalletProps {
   userData: UserData | null;
   onBack: () => void;
+  onNavigate?: (view: any) => void;
 }
 
 interface Transaction {
@@ -29,7 +30,7 @@ interface Transaction {
   };
 }
 
-export default function Wallet({ userData, onBack }: WalletProps) {
+export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
@@ -296,7 +297,7 @@ export default function Wallet({ userData, onBack }: WalletProps) {
 
           <div className="grid grid-cols-2 gap-4 mt-8">
             <button 
-              onClick={() => setShowDeposit(true)}
+              onClick={() => onNavigate ? onNavigate('receive') : setShowDeposit(true)}
               className="bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
             >
               <Plus className="w-5 h-5" />

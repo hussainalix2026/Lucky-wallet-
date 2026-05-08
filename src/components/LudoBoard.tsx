@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, RotateCcw, Play, User, Sparkles, ChevronLeft } from 'lucide-react';
+import { Trophy, RotateCcw, Play, User, Sparkles, ChevronLeft, Bot } from 'lucide-react';
 import Dice3D from './Dice3D';
 import { db } from '../firebase';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';

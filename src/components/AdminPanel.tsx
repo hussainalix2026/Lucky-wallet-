@@ -60,6 +60,19 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
     upiId: 'razorpay.me/@grantlucky137',
     paymentLink: 'https://rzp.io/rzp/s8ouvl69'
   });
+  const [depositSettings, setDepositSettings] = useState({
+    manualPaymentLink: '',
+    bankDetails: {
+      bankName: 'HDFC Bank',
+      accountHolder: 'GrandLuck Pro Services',
+      accountNumber: '50100456789123',
+      ifscCode: 'HDFC0001234'
+    },
+    walletIds: {
+      mobikwik: '9876543210',
+      freecharge: '9876543210'
+    }
+  });
 
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
@@ -109,6 +122,14 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
         }
         if (data.upiSettings) {
           setUpiSettings(data.upiSettings);
+        }
+        if (data.depositSettings) {
+          setDepositSettings(prev => ({
+            ...prev,
+            ...data.depositSettings,
+            bankDetails: { ...prev.bankDetails, ...data.depositSettings.bankDetails },
+            walletIds: { ...prev.walletIds, ...data.depositSettings.walletIds }
+          }));
         }
       }
     }, (err) => handleAdminError(err, 'settings/global'));
@@ -349,7 +370,8 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
       await setDoc(doc(db, 'settings', 'global'), {
         withdrawalLimits,
         referralBonus,
-        upiSettings
+        upiSettings,
+        depositSettings
       }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, 'settings/global'));
       setMessage({ type: 'success', text: 'Settings updated successfully!' });
     } catch (err) {
@@ -876,9 +898,61 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
 
                   <div className="space-y-6">
                     <h3 className="font-black text-zinc-900 tracking-tight flex items-center gap-2">
-                      <QrCode className="w-5 h-5 text-blue-500" />
-                      Manual UPI Payment Settings
+                      <Landmark className="w-5 h-5 text-emerald-500" />
+                      Deposit Configuration
                     </h3>
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Manual UPI Payment Link (For QR)</label>
+                        <input 
+                          type="text"
+                          value={depositSettings.manualPaymentLink}
+                          onChange={(e) => setDepositSettings({...depositSettings, manualPaymentLink: e.target.value})}
+                          placeholder="e.g. upi://pay?pa=name@upi&am=100"
+                          className="w-full bg-zinc-50 border-zinc-100 border-2 rounded-2xl py-4 px-6 focus:border-emerald-500 focus:ring-0 transition-all font-black text-lg"
+                        />
+                        <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest ml-1">This link will be used to generate the QR code for UPI deposits.</p>
+                      </div>
+
+                      <div className="bg-zinc-50 p-6 rounded-3xl border border-zinc-100 space-y-4">
+                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Bank Deposit Details</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Bank Name</label>
+                            <input type="text" value={depositSettings.bankDetails.bankName} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, bankName: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">A/C Holder</label>
+                            <input type="text" value={depositSettings.bankDetails.accountHolder} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountHolder: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">A/C Number</label>
+                            <input type="text" value={depositSettings.bankDetails.accountNumber} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountNumber: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">IFSC Code</label>
+                            <input type="text" value={depositSettings.bankDetails.ifscCode} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, ifscCode: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-zinc-50 p-6 rounded-3xl border border-zinc-100 space-y-4">
+                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Wallet IDs</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Mobikwik</label>
+                            <input type="text" value={depositSettings.walletIds.mobikwik} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, mobikwik: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Freecharge</label>
+                            <input type="text" value={depositSettings.walletIds.freecharge} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, freecharge: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
                     <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">UPI ID</label>

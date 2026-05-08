@@ -12,7 +12,8 @@ import Results from './components/Results';
 import AdminPanel from './components/AdminPanel';
 import PaymentVerification from './components/PaymentVerification';
 import LudoGame from './components/LudoGame';
-import { Wallet as WalletIcon, Ticket, Trophy, History, ShieldCheck, LogOut, Timer, Zap, Sparkles, Camera, Gamepad2, Trophy as TrophyIcon } from 'lucide-react';
+import ReceivePayment from './components/ReceivePayment';
+import { Wallet as WalletIcon, Ticket, Trophy, History, ShieldCheck, LogOut, Timer, Zap, Sparkles, Camera, Gamepad2, Trophy as TrophyIcon, QrCode } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { handleFirestoreError, OperationType } from './utils/firestoreErrorHandler';
@@ -86,7 +87,7 @@ async function testConnection() {
 }
 testConnection();
 
-export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo';
+export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo' | 'receive';
 
 export interface UserData {
   uid: string;
@@ -213,7 +214,7 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard': return <Dashboard userData={userData} onNavigate={setCurrentView} />;
-      case 'wallet': return <Wallet userData={userData} onBack={() => setCurrentView('dashboard')} />;
+      case 'wallet': return <Wallet userData={userData} onBack={() => setCurrentView('dashboard')} onNavigate={setCurrentView} />;
       case 'buy': return (
         <BuyNumber 
           userData={userData} 
@@ -246,6 +247,7 @@ export default function App() {
         />
       );
       case 'verification': return <PaymentVerification userData={userData} onBack={() => setCurrentView('dashboard')} />;
+      case 'receive': return <ReceivePayment userData={userData} onBack={() => setCurrentView('verification')} onViewHistory={() => setCurrentView('purchases')} />;
       case 'ludo': return (
         <LudoGame 
           userData={userData} 
@@ -361,7 +363,7 @@ export default function App() {
           </main>
   
           {/* Bottom Navigation */}
-          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-zinc-900/80 backdrop-blur-xl border-t border-zinc-800 px-6 py-3 flex justify-between items-center z-50">
+          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-zinc-900/80 backdrop-blur-xl border-t border-zinc-800 px-4 py-3 flex justify-between items-center z-50">
             <NavButton 
               active={currentView === 'dashboard'} 
               onClick={() => setCurrentView('dashboard')} 
@@ -374,6 +376,20 @@ export default function App() {
               icon={<Ticket className="w-6 h-6" />} 
               label="Play" 
             />
+            
+            {/* Middle Button - Receive */}
+            <div className="relative -mt-12">
+               <div className="absolute inset-0 bg-emerald-500 rounded-full blur-xl opacity-20"></div>
+               <button 
+                onClick={() => setCurrentView('receive')}
+                className={`relative w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-2xl ${
+                  currentView === 'receive' ? 'bg-emerald-500 text-white scale-110 shadow-emerald-500/40' : 'bg-zinc-800 text-emerald-500 hover:bg-zinc-700'
+                }`}
+               >
+                 <QrCode className="w-8 h-8" />
+               </button>
+            </div>
+
             <NavButton 
               active={currentView === 'results'} 
               onClick={() => setCurrentView('results')} 
