@@ -12,7 +12,6 @@ import Results from './components/Results';
 import AdminPanel from './components/AdminPanel';
 import PaymentVerification from './components/PaymentVerification';
 import LudoGame from './components/LudoGame';
-import CricketFantasy from './components/CricketFantasy';
 import { Wallet as WalletIcon, Ticket, Trophy, History, ShieldCheck, LogOut, Timer, Zap, Sparkles, Camera, Gamepad2, Trophy as TrophyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -87,7 +86,7 @@ async function testConnection() {
 }
 testConnection();
 
-export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo' | 'cricket';
+export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo';
 
 export interface UserData {
   uid: string;
@@ -118,6 +117,7 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
   const [prefillData, setPrefillData] = useState<{ number: number, investment: number } | null>(null);
+  const [selectedLudoGame, setSelectedLudoGame] = useState<{ id: string, mode: 'player' | 'spectator' } | null>(null);
 
   const handleLogoClick = () => {
     const newClicks = logoClicks + 1;
@@ -232,10 +232,30 @@ export default function App() {
         />
       );
       case 'results': return <Results onBack={() => setCurrentView('dashboard')} />;
-      case 'admin': return <AdminPanel onBack={() => setCurrentView('dashboard')} />;
+      case 'admin': return (
+        <AdminPanel 
+          onBack={() => setCurrentView('dashboard')} 
+          onSpectateLudo={(gameId) => {
+            setSelectedLudoGame({ id: gameId, mode: 'spectator' });
+            setCurrentView('ludo');
+          }}
+          onJoinLudo={(gameId) => {
+            setSelectedLudoGame({ id: gameId, mode: 'player' });
+            setCurrentView('ludo');
+          }}
+        />
+      );
       case 'verification': return <PaymentVerification userData={userData} onBack={() => setCurrentView('dashboard')} />;
-      case 'ludo': return <LudoGame userData={userData} onBack={() => setCurrentView('dashboard')} />;
-      case 'cricket': return <CricketFantasy userData={userData} onBack={() => setCurrentView('dashboard')} />;
+      case 'ludo': return (
+        <LudoGame 
+          userData={userData} 
+          onBack={() => {
+            setCurrentView('dashboard');
+            setSelectedLudoGame(null);
+          }} 
+          adminGameConfig={selectedLudoGame}
+        />
+      );
       default: return <Dashboard userData={userData} onNavigate={setCurrentView} />;
     }
   };

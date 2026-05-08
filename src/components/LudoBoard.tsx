@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, RotateCcw, Play, User, Bot, Sparkles, ChevronLeft } from 'lucide-react';
+import { Trophy, RotateCcw, Play, User, Sparkles, ChevronLeft } from 'lucide-react';
 import Dice3D from './Dice3D';
+import { db } from '../firebase';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 
 interface LudoBoardProps {
   onGameOver: (winner: string) => void;
   onQuit: () => void;
   playersCount?: number;
   prize?: number;
+  gameId?: string;
+  isSpectator?: boolean;
+  userColor?: PlayerColor;
+  isHost?: boolean;
 }
 
 type PlayerColor = 'red' | 'blue' | 'yellow' | 'green';
@@ -51,7 +57,16 @@ const START_INDEX: Record<PlayerColor, number> = {
   green: 39,
 };
 
-export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize = 100000 }: LudoBoardProps) {
+export default function LudoBoard({ 
+  onGameOver, 
+  onQuit, 
+  playersCount = 4, 
+  prize = 100000, 
+  gameId, 
+  isSpectator, 
+  userColor = 'red',
+  isHost = true 
+}: LudoBoardProps) {
   const [diceValue, setDiceValue] = useState<number>(1);
   const [isRolling, setIsRolling] = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState<PlayerColor>('red');
@@ -60,27 +75,76 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
     const colors: PlayerColor[] = playersCount === 2 ? ['red', 'yellow'] : ['red', 'blue', 'yellow', 'green'];
     colors.forEach((color, colorIdx) => {
       for (let i = 1; i <= 4; i++) {
-        initialPieces.push({ id: (playersCount === 2 && color === 'yellow' ? 2 : colorIdx) * 4 + i, color, position: -1 });
+        // Use a consistent ID system regardless of which colors are active
+        const colorOffset = ['red', 'blue', 'yellow', 'green'].indexOf(color);
+        initialPieces.push({ id: colorOffset * 4 + i, color, position: -1 });
       }
     });
     return initialPieces;
   });
-  const [message, setMessage] = useState('Your Turn (Red)');
+  const [message, setMessage] = useState(`Your Turn (${userColor.toUpperCase()})`);
   const [canRoll, setCanRoll] = useState(true);
   const [movablePieces, setMovablePieces] = useState<number[]>([]);
   const [winner, setWinner] = useState<string | null>(null);
   const [showEffect, setShowEffect] = useState<{ type: 'capture' | 'finish', x: number, y: number } | null>(null);
+  const [isAutoPlay, setIsAutoPlay] = useState(false);
+  const [consecutiveSixes, setConsecutiveSixes] = useState(0);
+
+  // Sync with Firestore if gameId exists
+  useEffect(() => {
+    if (!gameId) return;
+    
+    const unsub = onSnapshot(doc(db, 'ludoGames', gameId), (snap) => {
+      const data = snap.data();
+      if (!data) return;
+
+      if (data.pieces) {
+        // For current pieces, we want to animate if we see a change
+        // But for the current player, they already handle their own animation
+        if (data.currentPlayer !== userColor || isSpectator) {
+          setPieces(data.pieces);
+        }
+      }
+      if (data.currentPlayer) setCurrentPlayer(data.currentPlayer);
+      if (data.diceValue) setDiceValue(data.diceValue);
+      if (data.isRolling !== undefined) setIsRolling(data.isRolling);
+      if (data.winner) setWinner(data.winner);
+    });
+
+    return () => unsub();
+  }, [gameId, userColor, isSpectator]);
+
+  const updateGameState = useCallback(async (updates: any) => {
+    if (!gameId) return;
+    try {
+      await updateDoc(doc(db, 'ludoGames', gameId), updates);
+    } catch (error) {
+      console.error('Error updating game state:', error);
+    }
+  }, [gameId]);
 
   const switchTurn = useCallback(() => {
+    setConsecutiveSixes(0);
     setCurrentPlayer(prev => {
       const order: PlayerColor[] = playersCount === 2 ? ['red', 'yellow'] : ['red', 'blue', 'yellow', 'green'];
       const nextIdx = (order.indexOf(prev) + 1) % order.length;
       const next = order[nextIdx];
-      setMessage(next === 'red' ? "Your Turn (Red)" : `${next.toUpperCase()}'s Turn`);
+      
+      if (isSpectator) {
+        setMessage(`${next.toUpperCase()}'s Turn (Spectating)`);
+      } else {
+        if (next === userColor) {
+          setMessage(`Your Turn (${userColor.toUpperCase()})`);
+        } else {
+          setMessage(`Waiting for ${next.toUpperCase()}...`);
+        }
+      }
       setCanRoll(true);
+      
+      updateGameState({ currentPlayer: next, diceValue: 1, isRolling: false });
       return next;
     });
-  }, [playersCount]);
+  }, [playersCount, isSpectator, userColor, updateGameState]);
 
   const movePiece = useCallback(async (id: number, val: number) => {
     if (winner || isRolling) return;
@@ -95,7 +159,7 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
 
     // Animate movement step by step
     for (let i = (startPos === -1 ? 0 : startPos + 1); i <= targetPos; i++) {
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 180));
       setPieces(prev => prev.map(p => p.id === id ? { ...p, position: i } : p));
     }
 
@@ -122,7 +186,7 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
           if (capturedPiece) {
             setShowEffect({ type: 'capture', x: finalC, y: finalR });
             setTimeout(() => setShowEffect(null), 1000);
-            setMessage(`Captured ${capturedPiece.color.toUpperCase()}!`);
+            setMessage(`${p.color === userColor ? 'You' : p.color.toUpperCase()} captured ${capturedPiece.color.toUpperCase()}!`);
             bonusTurn = true;
             
             nextPieces = nextPieces.map(item => 
@@ -141,24 +205,31 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
 
         const playerPieces = nextPieces.filter(item => item.color === p.color);
         if (playerPieces.every(item => item.position === 58)) {
-          setWinner(p.color === 'red' ? 'You' : 'Bot');
-          onGameOver(p.color === 'red' ? 'You' : 'Bot');
+          const winnerName = p.color === userColor ? 'You' : `${p.color.toUpperCase()}`;
+          setWinner(winnerName);
+          onGameOver(winnerName);
           return nextPieces;
         }
       }
 
       if (val === 6) bonusTurn = true;
 
-      if (bonusTurn) {
+      if (bonusTurn && !winner) {
         setCanRoll(true);
-        setMessage(p.color === 'red' ? "Roll again!" : "Bot rolls again!");
-      } else {
+        if (p.color === userColor) {
+          setMessage("Roll again!");
+        } else {
+          setMessage(`${p.color.toUpperCase()} rolls again!`);
+        }
+        updateGameState({ pieces: nextPieces, diceValue: 1, isRolling: false });
+      } else if (!winner) {
+        updateGameState({ pieces: nextPieces });
         switchTurn();
       }
 
       return nextPieces;
     });
-  }, [winner, isRolling, switchTurn, onGameOver, pieces]);
+  }, [winner, isRolling, switchTurn, onGameOver, pieces, userColor, updateGameState]);
 
   const getBotBestMove = useCallback((movableIds: number[], val: number, color: PlayerColor) => {
     const scores = movableIds.map(id => {
@@ -166,27 +237,55 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
       let score = 0;
       const targetPos = piece.position === -1 ? 0 : piece.position + val;
 
-      if (targetPos === 58) score += 1000;
+      // 1. Finish priority
+      if (targetPos === 58) score += 2000;
+
+      // 2. Home stretch priority
+      if (targetPos >= 52) score += 500;
 
       if (targetPos < 52) {
         const [tr, tc] = getPieceCoords({ ...piece, position: targetPos });
         const isSafe = (tr === 6 && tc === 1) || (tr === 1 && tc === 8) || 
-                       (tr === 8 && tc === 13) || (tr === 13 && tc === 6);
+                       (tr === 8 && tc === 13) || (tr === 13 && tc === 6) ||
+                       (tr === 2 && tc === 6) || (tr === 6 && tc === 12) || 
+                       (tr === 12 && tc === 8) || (tr === 8 && tc === 2);
         
-        if (!isSafe) {
-          const opponentPieces = pieces.filter(p => p.color !== color && p.position !== -1 && p.position < 52);
-          const canCapture = opponentPieces.some(p => {
-            const [or, oc] = getPieceCoords(p);
-            return or === tr && oc === tc;
-          });
-          if (canCapture) score += 800;
+        // 3. Captures
+        const opponentPieces = pieces.filter(p => p.color !== color && p.position !== -1 && p.position < 52);
+        const captureTargets = opponentPieces.filter(p => {
+          const [or, oc] = getPieceCoords(p);
+          return or === tr && oc === tc;
+        });
+
+        if (captureTargets.length > 0 && !isSafe) {
+          score += 1500; // Strong desire to capture
+        }
+
+        // 4. Safety
+        if (isSafe) {
+          score += 400;
         } else {
-          score += 200;
+          // Check if being chased
+          const dangerCount = opponentPieces.filter(p => {
+            const opPathPos = (START_INDEX[p.color] + p.position) % 52;
+            const targetPathPos = (START_INDEX[color] + targetPos) % 52;
+            const diff = (targetPathPos - opPathPos + 52) % 52;
+            return diff > 0 && diff <= 6; // Within 1 dice roll of being captured
+          }).length;
+          score -= dangerCount * 300;
+        }
+
+        // 5. Leaving home
+        if (piece.position === -1 && val === 6) {
+          score += 800; // Get more pieces out
         }
       }
 
-      if (piece.position === -1 && val === 6) score += 500;
-      score += targetPos * 2;
+      // 6. General progress
+      score += targetPos * 5;
+
+      // Randomness to make it feel human
+      score += Math.random() * 50;
 
       return { id, score };
     });
@@ -206,42 +305,73 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
       }).map(p => p.id);
 
       if (movable.length === 0) {
-        setMessage("No moves possible!");
+        setMessage(`${currentPlayer.toUpperCase()} has no moves!`);
         setTimeout(switchTurn, 1000);
+      } else if (movable.length === 1 && (currentPlayer === userColor || isAutoPlay)) {
+        // Automatic move if only one choice
+        setMovablePieces(movable);
+        setMessage("Only one move possible!");
+        setTimeout(() => movePiece(movable[0], val), 1000);
       } else {
         setMovablePieces(movable);
-        setMessage(currentPlayer === 'red' ? "Select a piece to move" : `${currentPlayer.toUpperCase()} is thinking...`);
+        if (currentPlayer === userColor) {
+          setMessage("Select a piece to move");
+        } else {
+          setMessage(`${currentPlayer.toUpperCase()} is thinking...`);
+        }
         
-        if (currentPlayer !== 'red') {
-          const bestMoveId = getBotBestMove(movable, val, currentPlayer);
-          setTimeout(() => movePiece(bestMoveId, val), 1000);
+        if (currentPlayer !== userColor || (isAutoPlay && !isSpectator)) {
+          // Only host or autonomous user handles bot turns to avoid multi-client conflicts
+          if (isHost || isAutoPlay) {
+            const bestMoveId = getBotBestMove(movable, val, currentPlayer);
+            setTimeout(() => movePiece(bestMoveId, val), 1200);
+          }
         }
       }
       return currentPieces;
     });
-  }, [currentPlayer, switchTurn, getBotBestMove, movePiece]);
+  }, [currentPlayer, switchTurn, getBotBestMove, movePiece, userColor, isAutoPlay, isSpectator]);
 
   const rollDice = useCallback(() => {
-    if (!canRoll || isRolling || winner) return;
+    if (!canRoll || isRolling || winner || isSpectator) return;
     setIsRolling(true);
     setCanRoll(false);
+    
+    updateGameState({ isRolling: true });
     
     // Simulate roll animation
     setTimeout(() => {
       const finalValue = Math.floor(Math.random() * 6) + 1;
       setDiceValue(finalValue);
       setIsRolling(false);
+      updateGameState({ diceValue: finalValue, isRolling: false });
+      
+      if (finalValue === 6) {
+        if (consecutiveSixes === 2) {
+          setMessage("3 Sixes In A Row! Turn Lost.");
+          setTimeout(switchTurn, 1500);
+          return;
+        }
+        setConsecutiveSixes(prev => prev + 1);
+      } else {
+        setConsecutiveSixes(0);
+      }
+      
       checkMovablePieces(finalValue);
     }, 1000);
-  }, [canRoll, isRolling, winner, checkMovablePieces]);
+  }, [canRoll, isRolling, winner, checkMovablePieces, isSpectator, updateGameState, consecutiveSixes, switchTurn]);
 
-  // Bot Auto-Roll
+  // Auto-Roll Logic
   useEffect(() => {
-    if (currentPlayer !== 'red' && canRoll && !isRolling && !winner) {
-      const timer = setTimeout(rollDice, 1500);
+    if (isSpectator) return;
+    const isBotTurn = currentPlayer !== userColor;
+    const shouldAutoRoll = isBotTurn || isAutoPlay;
+    
+    if (shouldAutoRoll && canRoll && !isRolling && !winner) {
+      const timer = setTimeout(rollDice, isBotTurn ? 1500 : 1000);
       return () => clearTimeout(timer);
     }
-  }, [currentPlayer, canRoll, isRolling, winner, rollDice]);
+  }, [currentPlayer, canRoll, isRolling, winner, rollDice, isAutoPlay, isSpectator, userColor]);
 
   const getPieceCoords = (piece: Piece) => {
     if (piece.position === -1) {
@@ -250,6 +380,10 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
       const baseCol = piece.color === 'red' ? 2 : piece.color === 'blue' ? 11 : piece.color === 'yellow' ? 11 : 2;
       const offset = (piece.id - 1) % 4;
       return [baseRow + (offset < 2 ? 0 : 1), baseCol + (offset % 2 === 0 ? 0 : 1)];
+    }
+    
+    if (piece.position === 58) {
+      return [7, 7];
     }
     
     if (piece.position >= 52) {
@@ -280,20 +414,20 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
     const index = piecesOnSquare.findIndex(p => p.id === piece.id);
     const total = piecesOnSquare.length;
     
-    // Simple grid offset for stacked pieces
-    const offsetSize = 1.5;
+    // Scale offset based on number of pieces - using larger values for realism
+    const offsetBase = 5; 
     if (total === 2) {
-      return { x: index === 0 ? -offsetSize : offsetSize, y: 0 };
+      return { x: index === 0 ? -offsetBase : offsetBase, y: 0 };
     }
     if (total === 3) {
-      if (index === 0) return { x: 0, y: -offsetSize };
-      if (index === 1) return { x: -offsetSize, y: offsetSize };
-      return { x: offsetSize, y: offsetSize };
+      if (index === 0) return { x: 0, y: -offsetBase };
+      if (index === 1) return { x: -offsetBase, y: offsetBase };
+      return { x: offsetBase, y: offsetBase };
     }
     // 4 or more
     const row = Math.floor(index / 2);
     const col = index % 2;
-    return { x: col === 0 ? -offsetSize : offsetSize, y: row === 0 ? -offsetSize : offsetSize };
+    return { x: col === 0 ? -offsetBase : offsetBase, y: row === 0 ? -offsetBase : offsetBase };
   };
 
   const renderCell = (row: number, col: number) => {
@@ -366,19 +500,28 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
     if (row === 8 && col === 13) { colorClass = "bg-yellow-500"; content = <Play className="w-3 h-3 text-white rotate-180" />; }
     if (row === 13 && col === 6) { colorClass = "bg-green-500"; content = <Play className="w-3 h-3 text-white rotate-270" />; }
 
-    // Other safe spots
-    if ((row === 2 && col === 6) || (row === 6 && col === 12) || (row === 12 && col === 8) || (row === 8 && col === 2)) {
-      colorClass = "bg-gray-300";
-      content = <Sparkles className="w-2 h-2 text-gray-600" />;
+    // Other safe spots - making them more visually distinct
+    const isSpecialSafe = (row === 2 && col === 6) || (row === 6 && col === 12) || (row === 12 && col === 8) || (row === 8 && col === 2);
+    if (isSpecialSafe) {
+      colorClass = "bg-zinc-300";
+      content = (
+        <div className="relative flex items-center justify-center w-full h-full">
+          <div className="absolute inset-2 border-2 border-dashed border-zinc-500/30 rounded-lg animate-[spin_10s_linear_infinite]"></div>
+          <Sparkles className="w-4 h-4 text-zinc-600 drop-shadow-sm" />
+        </div>
+      );
     }
 
+    const isHomeStretch = (row === 7 && col > 0 && col < 7) || (row === 7 && col > 7 && col < 14) || (col === 7 && row > 0 && row < 7) || (col === 7 && row > 7 && row < 14);
+
     return (
-      <div className={`${colorClass} border border-black/15 rounded-sm flex items-center justify-center relative overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.15)]`}>
+      <div className={`${colorClass} border border-black/15 rounded-sm flex items-center justify-center relative overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.15)] ${isHomeStretch ? 'brightness-110' : ''}`}>
         {content}
         {/* Subtle printed board texture */}
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')] opacity-15 pointer-events-none"></div>
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/black-linen.png')] opacity-10 pointer-events-none"></div>
         {/* Inner glow for depth */}
         <div className="absolute inset-0 bg-gradient-to-br from-black/5 to-white/5 pointer-events-none"></div>
+        {isSpecialSafe && <div className="absolute inset-0 bg-yellow-400/5 pulse-subtle pointer-events-none"></div>}
       </div>
     );
   };
@@ -413,7 +556,14 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
       </motion.div>
 
       {/* The Board Container with 3D perspective */}
-      <div className="relative perspective-1000 z-10">
+      <motion.div 
+        animate={isRolling ? { 
+          x: [0, -2, 2, -2, 2, 0],
+          y: [0, 2, -2, 2, -2, 0]
+        } : {}}
+        transition={isRolling ? { repeat: Infinity, duration: 0.1 } : {}}
+        className="relative perspective-1000 z-10"
+      >
         {/* Board Frame */}
         <div 
           className="relative aspect-square w-full max-w-[450px] bg-[#f0e6d2] rounded-2xl border-[20px] border-[#2a1d15] p-1 grid grid-cols-15 grid-rows-15 gap-0.5 overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.9),inset_0_0_30px_rgba(0,0,0,0.3)]"
@@ -437,7 +587,7 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
           {/* Pieces */}
           {pieces.map(p => {
             const [r, c] = getPieceCoords(p);
-            const isMovable = movablePieces.includes(p.id) && currentPlayer === 'red';
+            const isMovable = movablePieces.includes(p.id) && currentPlayer === 'red' && !isSpectator;
             const offset = getPieceOffset(p);
             
             const colorGradients = {
@@ -453,19 +603,22 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
                 layout
                 disabled={!isMovable}
                 onClick={() => isMovable && movePiece(p.id, diceValue)}
-                animate={isMovable ? { 
-                  y: [0, -15, 0],
-                  scale: [1, 1.2, 1],
-                  rotateZ: [0, 10, -10, 0]
-                } : {}}
-                transition={isMovable ? { repeat: Infinity, duration: 1.2 } : { type: "spring", stiffness: 300, damping: 20 }}
+                animate={{
+                  scale: isMovable ? [1, 1.15, 1] : 1,
+                  y: isMovable ? [0, -8, 0] : 0,
+                }}
+                transition={{
+                  layout: { type: "spring", stiffness: 200, damping: 25 },
+                  y: { repeat: Infinity, duration: 1, ease: "easeInOut" },
+                  scale: { repeat: Infinity, duration: 1, ease: "easeInOut" }
+                }}
                 className={`absolute w-[6%] h-[6%] z-20 transition-all ${
                   isMovable ? 'cursor-pointer z-30' : ''
                 }`}
                 style={{ 
                   top: `${(r / 15) * 100}%`, 
                   left: `${(c / 15) * 100}%`,
-                  transform: `translate(calc(5% + ${offset.x}px), calc(5% + ${offset.y}px))`,
+                  transform: `translate(calc(10% + ${offset.x}px), calc(10% + ${offset.y}px))`,
                   transformStyle: 'preserve-3d'
                 }}
               >
@@ -507,10 +660,10 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
         <AnimatePresence>
           {showEffect && (
             <motion.div
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1.5, opacity: 1 }}
-              exit={{ scale: 2, opacity: 0 }}
-              className="absolute z-50 pointer-events-none flex items-center justify-center"
+              initial={{ scale: 0, opacity: 0, rotate: -45 }}
+              animate={{ scale: [0, 2, 1.5], opacity: 1, rotate: 0 }}
+              exit={{ scale: 3, opacity: 0, y: -50 }}
+              className="absolute z-[100] pointer-events-none flex items-center justify-center whitespace-nowrap"
               style={{
                 top: `${(showEffect.y / 15) * 100}%`,
                 left: `${(showEffect.x / 15) * 100}%`,
@@ -518,10 +671,13 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
                 height: '6.66%'
               }}
             >
-              <div className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-tighter shadow-xl ${
-                showEffect.type === 'capture' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'
+              <div className={`px-4 py-2 rounded-2xl flex flex-col items-center gap-1 shadow-2xl backdrop-blur-md border ${
+                showEffect.type === 'capture' ? 'bg-red-500/90 border-red-400 text-white' : 'bg-emerald-500/90 border-emerald-400 text-white'
               }`}>
-                {showEffect.type === 'capture' ? 'Captured!' : 'Finished!'}
+                {showEffect.type === 'capture' ? <Bot className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                  {showEffect.type === 'capture' ? 'KNOCKOUT!' : 'GOAL!'}
+                </span>
               </div>
             </motion.div>
           )}
@@ -533,15 +689,17 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
         <div className="absolute bottom-[10%] left-[10%] w-[20%] h-[20%] border-4 border-green-500/20 rounded-full pointer-events-none"></div>
         <div className="absolute bottom-[10%] right-[10%] w-[20%] h-[20%] border-4 border-yellow-500/20 rounded-full pointer-events-none"></div>
       </div>
-    </div>
+    </motion.div>
 
     {/* Controls Area */}
     <div className="w-full max-w-[450px] bg-[#2a1d15] rounded-[2.5rem] border border-white/10 p-6 flex items-center justify-between shadow-2xl relative overflow-hidden z-10">
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-blue-500/5 pointer-events-none"></div>
         
-        {/* Player 1 */}
-        <div className={`flex flex-col items-center gap-2 transition-all ${currentPlayer === 'red' ? 'scale-110 opacity-100' : 'opacity-40'}`}>
-          <div className="w-14 h-14 rounded-2xl bg-red-500 border-2 border-white/20 flex items-center justify-center text-white shadow-lg shadow-red-500/20">
+        {/* Left Side (Current Player or User) */}
+        <div className={`flex flex-col items-center gap-2 transition-all ${currentPlayer === userColor ? 'scale-110 opacity-100' : 'opacity-40'}`}>
+          <div className={`w-14 h-14 rounded-2xl border-2 border-white/20 flex items-center justify-center text-white shadow-lg ${
+            userColor === 'red' ? 'bg-red-500' : userColor === 'blue' ? 'bg-blue-500' : userColor === 'yellow' ? 'bg-yellow-500' : 'bg-green-500'
+          }`}>
             <User className="w-8 h-8" />
           </div>
           <p className="text-[10px] font-black text-white uppercase tracking-widest">You</p>
@@ -549,25 +707,37 @@ export default function LudoBoard({ onGameOver, onQuit, playersCount = 4, prize 
 
         {/* Dice */}
         <div className="flex flex-col items-center gap-3">
+          <button 
+            onClick={() => setIsAutoPlay(!isAutoPlay)}
+            className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${
+              isAutoPlay ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-white/10 text-white/40 border border-white/10'
+            }`}
+          >
+            {isAutoPlay ? 'Auto Play: ON' : 'Auto Play: OFF'}
+          </button>
           <Dice3D 
             value={diceValue} 
             isRolling={isRolling} 
             onClick={rollDice}
-            disabled={!canRoll || currentPlayer !== 'red' || isRolling || !!winner}
+            disabled={!canRoll || currentPlayer !== userColor || isRolling || !!winner}
           />
           <p className="text-[8px] font-black text-white/40 uppercase tracking-[0.3em] mt-2">
-            {isRolling ? 'Rolling...' : canRoll && currentPlayer === 'red' ? 'Your Turn' : 'Wait...'}
+            {isRolling ? 'Rolling...' : canRoll && currentPlayer === userColor ? 'Your Turn' : 'Wait...'}
           </p>
         </div>
 
-        {/* Next Player Indicator */}
-        <div className={`flex flex-col items-center gap-2 transition-all ${currentPlayer !== 'red' ? 'scale-110 opacity-100' : 'opacity-40'}`}>
+        {/* Right Side (Active Opponent) */}
+        <div className={`flex flex-col items-center gap-2 transition-all ${currentPlayer !== userColor ? 'scale-110 opacity-100' : 'opacity-40'}`}>
           <div className={`w-14 h-14 rounded-2xl border-2 border-white/20 flex items-center justify-center text-white shadow-lg ${
-            currentPlayer === 'blue' ? 'bg-blue-500' : currentPlayer === 'yellow' ? 'bg-yellow-500' : 'bg-green-500'
+            currentPlayer !== userColor ? 
+              (currentPlayer === 'red' ? 'bg-red-500' : currentPlayer === 'blue' ? 'bg-blue-500' : currentPlayer === 'yellow' ? 'bg-yellow-500' : 'bg-green-500') :
+              'bg-zinc-700'
           }`}>
-            <Bot className="w-8 h-8" />
+            <User className="w-8 h-8" />
           </div>
-          <p className="text-[10px] font-black text-white uppercase tracking-widest">{currentPlayer === 'red' ? 'Opponent' : currentPlayer.toUpperCase()}</p>
+          <p className="text-[10px] font-black text-white uppercase tracking-widest">
+            {currentPlayer === userColor ? 'Opponent' : `${currentPlayer.toUpperCase()}`}
+          </p>
         </div>
       </div>
 

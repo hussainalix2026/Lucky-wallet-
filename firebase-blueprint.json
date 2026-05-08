@@ -105,6 +105,13 @@
             "referrer": { "type": "number" },
             "referee": { "type": "number" }
           }
+        },
+        "upiSettings": {
+          "type": "object",
+          "properties": {
+            "upiId": { "type": "string" },
+            "paymentLink": { "type": "string" }
+          }
         }
       }
     },
@@ -145,6 +152,52 @@
         "lastMoveAt": { "type": "string", "format": "date-time" }
       },
       "required": ["players", "pieces", "currentPlayer", "status", "createdAt"]
+    },
+    "FantasyMatch": {
+      "title": "FantasyMatch",
+      "description": "Cricket matches for fantasy contests",
+      "type": "object",
+      "properties": {
+        "league": { "type": "string" },
+        "team1": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "short": { "type": "string" },
+            "logo": { "type": "string" }
+          }
+        },
+        "team2": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "short": { "type": "string" },
+            "logo": { "type": "string" }
+          }
+        },
+        "startTime": { "type": "string", "format": "date-time" },
+        "prizePool": { "type": "string" },
+        "isLive": { "type": "boolean" },
+        "thumbnail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["league", "team1", "team2", "startTime", "prizePool", "createdAt"]
+    },
+    "FantasyPlayer": {
+      "title": "FantasyPlayer",
+      "description": "Players for fantasy matches",
+      "type": "object",
+      "properties": {
+        "matchId": { "type": "string" },
+        "name": { "type": "string" },
+        "photo": { "type": "string" },
+        "role": { "type": "string", "enum": ["WK", "BAT", "AR", "BOWL"] },
+        "team": { "type": "string" },
+        "credits": { "type": "number" },
+        "selBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["matchId", "name", "photo", "role", "team", "credits", "createdAt"]
     }
   },
   "firestore": {
@@ -175,6 +228,14 @@
     "/ludoGames/{gameId}": {
       "schema": "LudoGame",
       "description": "Real-time Ludo games"
+    },
+    "/fantasyMatches/{matchId}": {
+      "schema": "FantasyMatch",
+      "description": "Cricket fantasy matches"
+    },
+    "/fantasyPlayers/{playerId}": {
+      "schema": "FantasyPlayer",
+      "description": "Players in fantasy matches"
     }
   }
 }

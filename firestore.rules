@@ -16,7 +16,8 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
-         request.auth.token.email == "hussainalix2026@gmail.com");
+         request.auth.token.email == "hussainalix2026@gmail.com" ||
+         request.auth.token.email == "8134861236@luckywallet.com");
     }
 
     // ===============================================================
@@ -70,6 +71,18 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
+    }
+
+    // Fantasy Matches
+    match /fantasyMatches/{matchId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Fantasy Players
+    match /fantasyPlayers/{playerId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

@@ -137,14 +137,6 @@ export default function Dashboard({ userData, onNavigate }: DashboardProps) {
           color="from-red-500 to-orange-600"
           delay={0.6}
         />
-        <MenuButton 
-          onClick={() => onNavigate('cricket')}
-          icon={<Trophy className="w-8 h-8" />}
-          title="Cricket Fantasy"
-          description="Build Team & Win"
-          color="from-emerald-600 to-blue-600"
-          delay={0.7}
-        />
       </div>
 
       {/* Refer & Earn Card */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
-import { collection, addDoc, doc, writeBatch, getDocs, query, where, increment } from 'firebase/firestore';
+import { collection, addDoc, doc, writeBatch, getDocs, query, where, increment, onSnapshot } from 'firebase/firestore';
 import { UserData } from '../App';
 import { Ticket, ChevronLeft, CheckCircle2, AlertCircle, Info, QrCode, Loader2, CreditCard, Sparkles, Zap, Target, ShieldCheck, Copy, ExternalLink, Wallet as WalletIcon, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -34,6 +34,32 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [globalSettings, setGlobalSettings] = useState<any>(null);
+  const [activeMerchantName, setActiveMerchantName] = useState('Digital Services');
+
+  const merchantNames = [
+    'Digital Services', 'Fast Checkout', 'Global Payments', 'Reliable Pay',
+    'Instant Settlement', 'Skyline Ventures', 'V-Care Payments', 'Zenith Solutions',
+    'Apex Enterprises', 'Nexus Digital', 'Prime Secure', 'Orbit Payments',
+    'Stellar Services', 'Nova Traders', 'Core Fintech', 'Pulse Digitals',
+    'Quantum Pay', 'Ultra Transact', 'Rapid Settle', 'Glance Services'
+  ];
+
+  React.useEffect(() => {
+    const randomName = merchantNames[Math.floor(Math.random() * merchantNames.length)];
+    setActiveMerchantName(randomName);
+  }, [showPayment]);
+
+  React.useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+      if (snap.exists()) {
+        setGlobalSettings(snap.data());
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/global');
+    });
+    return () => unsub();
+  }, []);
 
   const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -408,7 +434,8 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                            paymentMethod === 'razorpay' ? 'Pay via Razorpay' : 
                            'Manual UPI Deposit'}
                         </p>
-                        <p className="text-2xl font-black text-white mt-1">₹{totalAmount}</p>
+                        <p className="text-2xl font-black text-white mt-1 uppercase tracking-tight">₹{totalAmount}</p>
+                        <p className="text-[9px] font-bold text-zinc-500 uppercase mt-1">Merchant: <span className="text-emerald-500">{activeMerchantName}</span></p>
                         {paymentMethod === 'wallet' && (
                           <p className={`text-[10px] font-bold mt-1 ${userData.balance >= totalAmount ? 'text-emerald-500' : 'text-red-500'}`}>
                             Your Balance: ₹{userData.balance.toFixed(2)}
@@ -489,63 +516,98 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
 
                     {paymentMethod === 'upi' && (
                       <div className="space-y-6">
-                        <div className="bg-white p-6 rounded-[2.5rem] flex flex-col items-center gap-4 shadow-xl border border-zinc-100">
-                          <div className="relative group">
-                            <div className="absolute -inset-2 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-3xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+                        <div className="bg-white p-6 rounded-[2.5rem] flex flex-col items-center gap-6 shadow-xl border border-zinc-100 ring-4 ring-emerald-500/10">
+                          <div className="w-full flex justify-between items-center px-2">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/UPI-Logo.png" className="h-4 object-contain opacity-70" alt="UPI" />
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/BHIM_logo.png" className="h-5 object-contain opacity-70" alt="BHIM" />
+                          </div>
+
+                          <div className="relative group p-4 bg-zinc-50 rounded-3xl border border-zinc-100">
                             <img 
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https://razorpay.me/@grantlucky137`}
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}&pn=${activeMerchantName}&am=${totalAmount}&cu=INR`)}`}
                               alt="Payment QR Code"
-                              className="w-56 h-56 relative rounded-2xl"
+                              className="w-48 h-48 relative z-10 p-2 bg-white rounded-2xl shadow-sm"
                               referrerPolicy="no-referrer"
                             />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-10">
+                              <QrCode className="w-20 h-20 text-emerald-500" />
+                            </div>
                           </div>
                           
-                          <div className="w-full space-y-3">
-                            <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
-                              <div className="flex flex-col">
-                                <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Payment Link</span>
-                                <span className="text-xs font-black text-zinc-900">razorpay.me/@grantlucky137</span>
-                              </div>
-                              <div className="flex gap-2">
+                          <div className="text-center space-y-4 w-full">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] animate-pulse">Scan & Pay with any UPI App</p>
+                              <div className="flex items-center justify-center gap-2">
+                                <p className="text-3xl font-black text-zinc-900 tracking-tighter">₹{totalAmount}</p>
                                 <button 
                                   onClick={() => {
-                                    navigator.clipboard.writeText('https://razorpay.me/@grantlucky137');
-                                    setMessage({ type: 'success', text: 'Link copied!' });
+                                    navigator.clipboard.writeText(totalAmount.toString());
+                                    setMessage({ type: 'success', text: 'Amount Copied!' });
                                   }}
-                                  className="p-2 bg-white hover:bg-zinc-100 rounded-xl border border-zinc-200 transition-colors"
+                                  className="p-1.5 bg-zinc-50 rounded-lg border border-zinc-100 text-zinc-400 hover:text-emerald-500 transition-all"
                                 >
-                                  <Copy className="w-4 h-4 text-zinc-600" />
+                                  <Copy className="w-3 h-3" />
                                 </button>
-                                <a 
-                                  href="https://razorpay.me/@grantlucky137" 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="p-2 bg-emerald-500 hover:bg-emerald-600 rounded-xl text-white transition-colors"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                </a>
                               </div>
+                              <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">To: <span className="text-emerald-600">{activeMerchantName}</span></p>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2">
-                              <div className="p-3 bg-zinc-50 rounded-2xl border border-zinc-100 text-center">
-                                <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Amount</p>
-                                <p className="text-sm font-black text-zinc-900">₹{selectedNumbers.length * investment}</p>
+                            <div className="h-px bg-zinc-100 w-full" />
+
+                            <div className="flex flex-col gap-3">
+                              <div className="grid grid-cols-3 gap-2">
+                                <a 
+                                  href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                >
+                                  <img src="https://img.icons8.com/color/48/phone-pe.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="PhonePe" />
+                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">PhonePe</span>
+                                </a>
+                                <a 
+                                  href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                >
+                                  <img src="https://img.icons8.com/color/48/paytm.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="Paytm" />
+                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Paytm</span>
+                                </a>
+                                <a 
+                                  href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                >
+                                  <img src="https://img.icons8.com/color/48/google-pay.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="GPay" />
+                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">G-Pay</span>
+                                </a>
                               </div>
-                              <div className="p-3 bg-zinc-50 rounded-2xl border border-zinc-100 text-center">
-                                <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Tickets</p>
-                                <p className="text-sm font-black text-zinc-900">{selectedNumbers.length}</p>
-                              </div>
-                              <div className="p-3 bg-zinc-50 rounded-2xl border border-zinc-100 text-center">
-                                <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Status</p>
-                                <p className="text-[10px] font-black text-orange-500 uppercase">Waiting</p>
+                              <a 
+                                href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-emerald-500/30"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                                Open Payment App
+                              </a>
+
+                              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between group">
+                                <div className="flex flex-col items-start text-left">
+                                  <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">UPI ID</span>
+                                  <span className="text-[11px] font-bold text-zinc-900 truncate max-w-[150px]">{globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}</span>
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+                                    setMessage({ type: 'success', text: 'UPI ID Copied!' });
+                                  }}
+                                  className="p-2 bg-white rounded-lg border border-zinc-200 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500 transition-all shadow-sm"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-4">
-                          <div className="flex items-center gap-2 px-1">
+                          <div className="flex items-center gap-2 px-1 text-left">
                             <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
                             <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Step 2: Enter Transaction Details</h4>
                           </div>
