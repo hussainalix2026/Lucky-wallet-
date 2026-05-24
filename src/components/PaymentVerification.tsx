@@ -148,7 +148,6 @@ export default function PaymentVerification({ userData, onBack }: PaymentVerific
               onChange={handleScreenshotChange}
               className="hidden"
               id="verification-screenshot-upload"
-              required
             />
             <label 
               htmlFor="verification-screenshot-upload"

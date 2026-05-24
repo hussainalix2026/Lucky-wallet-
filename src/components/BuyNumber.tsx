@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import StripePayment from './StripePayment';
 import RazorpayPayment from './RazorpayPayment';
+import RazorpayQRCard from './RazorpayQRCard';
 
 interface BuyNumberProps {
   userData: UserData | null;
@@ -29,13 +30,24 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
   const [showPayment, setShowPayment] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [razorpayOrder, setRazorpayOrder] = useState<any | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'razorpay' | 'upi' | 'wallet'>('wallet');
+  const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'upi' | 'wallet'>('wallet');
   const [utr, setUtr] = useState('');
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedManualUpi, setSelectedManualUpi] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [activeMerchantName, setActiveMerchantName] = useState('Digital Services');
+
+  const manualUpiList = globalSettings?.depositSettings?.manualUpiList || [];
+  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+  const isManualRazorpay = paymentMethod === 'razorpay' && (!globalSettings?.upiSettings?.razorpayId || globalSettings?.upiSettings?.razorpayQrCodePhoto);
+
+  React.useEffect(() => {
+    if (manualUpiList.length > 0 && !selectedManualUpi) {
+      setSelectedManualUpi(manualUpiList[0]);
+    }
+  }, [manualUpiList, paymentMethod]);
 
   const merchantNames = [
     'Digital Services', 'Fast Checkout', 'Global Payments', 'Reliable Pay',
@@ -45,10 +57,20 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
     'Quantum Pay', 'Ultra Transact', 'Rapid Settle', 'Glance Services'
   ];
 
+  const totalAmount = selectedNumbers.length * investment;
+
   React.useEffect(() => {
     const randomName = merchantNames[Math.floor(Math.random() * merchantNames.length)];
     setActiveMerchantName(randomName);
-  }, [showPayment]);
+
+    if (showPayment && userData) {
+      if (userData.balance >= totalAmount) {
+        setPaymentMethod('wallet');
+      } else {
+        setPaymentMethod('upi');
+      }
+    }
+  }, [showPayment, totalAmount, userData]);
 
   React.useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
@@ -76,7 +98,72 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
     }
   };
 
-  const totalAmount = selectedNumbers.length * investment;
+  const handleSimulateSuccess = async (simulatedUtr: string, mockBase64Screenshot: string, autoApprove: boolean) => {
+    setUtr(simulatedUtr);
+    setScreenshot(mockBase64Screenshot);
+    
+    if (autoApprove && userData) {
+      setLoading(true);
+      try {
+        const drawDate = new Date().toISOString().split('T')[0];
+        const winningAmount = INVESTMENT_TIERS.find(opt => opt.amount === investment)?.reward || 0;
+        const totalAmount = selectedNumbers.length * investment;
+        const batch = writeBatch(db);
+        
+        // Write purchased numbers as instantly Approved/Active
+        const numbers = selectedNumbers;
+        for (const num of numbers) {
+          const purchaseRef = doc(collection(db, 'purchasedNumbers'));
+          batch.set(purchaseRef, {
+            uid: userData.uid,
+            number: num,
+            amount: investment,
+            winningAmount,
+            status: 'Active', 
+            drawDate,
+            createdAt: new Date().toISOString(),
+            utr: simulatedUtr,
+            screenshot: mockBase64Screenshot,
+            paymentMethod: paymentMethod === 'razorpay' ? 'Razorpay QR' : 'Manual UPI'
+          });
+        }
+
+        // Create transaction directly as Success
+        const txRef = doc(collection(db, 'transactions'));
+        batch.set(txRef, {
+          uid: userData.uid,
+          amount: totalAmount,
+          type: 'Deposit', 
+          status: 'Success', 
+          utr: simulatedUtr,
+          screenshot: mockBase64Screenshot,
+          paymentMethod: paymentMethod === 'razorpay' ? 'Razorpay QR' : 'Manual UPI',
+          isDirectPurchase: true,
+          purchaseDetails: {
+            numbers: selectedNumbers,
+            investment,
+            drawDate
+          },
+          createdAt: new Date().toISOString(),
+        });
+
+        await batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, 'simulate-instant-deposit'));
+        
+        setMessage({ type: 'success', text: 'UPI Sandbox Payment Received & Ticket Instantly Activated!' });
+        setSelectedNumbers([]);
+        setShowPayment(false);
+        setUtr('');
+        setScreenshot(null);
+      } catch (err) {
+        console.error(err);
+        setMessage({ type: 'error', text: 'Simulation transaction saving failed.' });
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setMessage({ type: 'success', text: 'Payment simulated! Tap Claim Deposit below to complete.' });
+    }
+  };
 
   const toggleNumber = (num: number) => {
     if (selectedNumbers.includes(num)) {
@@ -120,6 +207,64 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
         const data = await response.json();
         setClientSecret(data.clientSecret);
       } else if (paymentMethod === 'razorpay') {
+        if (isManualRazorpay) {
+          if (!utr) {
+            setMessage({ type: 'error', text: 'Please enter Transaction ID (UTR).' });
+            setLoading(false);
+            return;
+          }
+          if (!screenshot) {
+            setMessage({ type: 'error', text: 'Please upload a payment screenshot as proof.' });
+            setLoading(false);
+            return;
+          }
+
+          const batch = writeBatch(db);
+          const numbers = selectedNumbers;
+          for (const num of numbers) {
+            const purchaseRef = doc(collection(db, 'purchasedNumbers'));
+            batch.set(purchaseRef, {
+              uid: userData.uid,
+              number: num,
+              amount: investment,
+              winningAmount,
+              status: 'Pending',
+              drawDate,
+              createdAt: new Date().toISOString(),
+              utr: utr,
+              screenshot: screenshot,
+              paymentMethod: 'Razorpay QR'
+            });
+          }
+
+          const txRef = doc(collection(db, 'transactions'));
+          batch.set(txRef, {
+            uid: userData.uid,
+            amount: totalAmount,
+            type: 'Deposit',
+            status: 'Pending',
+            utr: utr,
+            screenshot: screenshot,
+            paymentMethod: 'Razorpay QR',
+            isDirectPurchase: true,
+            purchaseDetails: {
+              numbers: selectedNumbers,
+              investment,
+              drawDate
+            },
+            createdAt: new Date().toISOString(),
+          });
+
+          await batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, 'batch-purchase-razorpay-qr'));
+
+          setMessage({ type: 'success', text: 'Purchase request submitted! Admin will verify and activate your tickets.' });
+          setSelectedNumbers([]);
+          setShowPayment(false);
+          setUtr('');
+          setScreenshot(null);
+          return;
+        }
+
         const response = await fetch('/api/razorpay/create-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -221,6 +366,12 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
       } else if (paymentMethod === 'upi') {
         if (!utr) {
           setMessage({ type: 'error', text: 'Please enter Transaction ID (UTR).' });
+          setLoading(false);
+          return;
+        }
+        if (!screenshot) {
+          setMessage({ type: 'error', text: 'Please upload a payment screenshot as proof.' });
+          setLoading(false);
           return;
         }
 
@@ -430,9 +581,8 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                       <div className="text-center">
                         <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">
                           {paymentMethod === 'wallet' ? 'Pay from Wallet' : 
-                           paymentMethod === 'stripe' ? 'Pay via Stripe' : 
-                           paymentMethod === 'razorpay' ? 'Pay via Razorpay' : 
-                           'Manual UPI Deposit'}
+                           paymentMethod === 'razorpay' ? 'Pay via Razorpay (INR)' : 
+                           'Manual UPI Deposit (INR)'}
                         </p>
                         <p className="text-2xl font-black text-white mt-1 uppercase tracking-tight">₹{totalAmount}</p>
                         <p className="text-[9px] font-bold text-zinc-500 uppercase mt-1">Merchant: <span className="text-emerald-500">{activeMerchantName}</span></p>
@@ -468,14 +618,6 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                       >
                         <CreditCard className="w-4 h-4" />
                         Razorpay
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('stripe')}
-                        className={`flex-1 min-w-[100px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all flex flex-col items-center gap-1 ${paymentMethod === 'stripe' ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}
-                      >
-                        <ShieldCheck className="w-4 h-4" />
-                        Stripe
                       </button>
                     </div>
 
@@ -514,90 +656,99 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                       </div>
                     )}
 
-                    {paymentMethod === 'upi' && (
+                    {(paymentMethod === 'upi' || isManualRazorpay) && (
                       <div className="space-y-6">
-                        <div className="bg-white p-6 rounded-[2.5rem] flex flex-col items-center gap-6 shadow-xl border border-zinc-100 ring-4 ring-emerald-500/10">
-                          <div className="w-full flex justify-between items-center px-2">
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/UPI-Logo.png" className="h-4 object-contain opacity-70" alt="UPI" />
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/BHIM_logo.png" className="h-5 object-contain opacity-70" alt="BHIM" />
-                          </div>
+                        <RazorpayQRCard 
+                          amount={totalAmount.toString()} 
+                          payLink={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${upiIdToUse}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`} 
+                          merchantName="HUSSAIN ALI"
+                          qrPhotoOverride={isManualRazorpay ? globalSettings?.upiSettings?.razorpayQrCodePhoto : globalSettings?.depositSettings?.qrCodePhoto}
+                          onSimulateSuccess={handleSimulateSuccess}
+                        />
 
-                          <div className="relative group p-4 bg-zinc-50 rounded-3xl border border-zinc-100">
-                            <img 
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}&pn=${activeMerchantName}&am=${totalAmount}&cu=INR`)}`}
-                              alt="Payment QR Code"
-                              className="w-48 h-48 relative z-10 p-2 bg-white rounded-2xl shadow-sm"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 flex items-center justify-center opacity-10">
-                              <QrCode className="w-20 h-20 text-emerald-500" />
-                            </div>
-                          </div>
-                          
+                        <div className="bg-zinc-800/20 p-6 rounded-[2.5rem] border border-zinc-800 space-y-6">
                           <div className="text-center space-y-4 w-full">
+                            {/* Manual UPI Selection */}
+                            {manualUpiList.length > 0 && (
+                              <div className="w-full space-y-2">
+                                 <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center">Available UPI Channels</p>
+                                 <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar justify-center">
+                                    {manualUpiList.map((uri: string, i: number) => (
+                                       <button
+                                         key={i}
+                                         type="button"
+                                         onClick={() => setSelectedManualUpi(uri)}
+                                         className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase transition-all whitespace-nowrap border ${selectedManualUpi === uri ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'}`}
+                                       >
+                                         Channel {i + 1}
+                                       </button>
+                                    ))}
+                                 </div>
+                              </div>
+                            )}
                             <div className="space-y-1">
-                              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] animate-pulse">Scan & Pay with any UPI App</p>
+                              <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Scan & Pay with any UPI App</p>
                               <div className="flex items-center justify-center gap-2">
-                                <p className="text-3xl font-black text-zinc-900 tracking-tighter">₹{totalAmount}</p>
+                                <p className="text-3xl font-black text-white tracking-tighter">₹{totalAmount}</p>
                                 <button 
                                   onClick={() => {
                                     navigator.clipboard.writeText(totalAmount.toString());
                                     setMessage({ type: 'success', text: 'Amount Copied!' });
                                   }}
-                                  className="p-1.5 bg-zinc-50 rounded-lg border border-zinc-100 text-zinc-400 hover:text-emerald-500 transition-all"
+                                  className="p-1.5 bg-zinc-900 rounded-lg border border-zinc-800 text-zinc-400 hover:text-emerald-500 transition-all"
                                 >
-                                  <Copy className="w-3 h-3" />
+                                  <Copy className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                              <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">To: <span className="text-emerald-600">{activeMerchantName}</span></p>
+                              <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">To: <span className="text-emerald-400">{activeMerchantName}</span></p>
                             </div>
 
-                            <div className="h-px bg-zinc-100 w-full" />
+                            <div className="h-px bg-zinc-800 w-full" />
 
                             <div className="flex flex-col gap-3">
                               <div className="grid grid-cols-3 gap-2">
                                 <a 
-                                  href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
-                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                  href={`phonepe://pay?pa=${encodeURIComponent(upiIdToUse)}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-900/50 border border-zinc-800 rounded-2xl hover:border-emerald-500 transition-all group"
                                 >
                                   <img src="https://img.icons8.com/color/48/phone-pe.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="PhonePe" />
-                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">PhonePe</span>
+                                  <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">PhonePe</span>
                                 </a>
                                 <a 
-                                  href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
-                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                  href={`paytmmp://pay?pa=${encodeURIComponent(upiIdToUse)}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-900/50 border border-zinc-800 rounded-2xl hover:border-emerald-500 transition-all group"
                                 >
                                   <img src="https://img.icons8.com/color/48/paytm.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="Paytm" />
-                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Paytm</span>
+                                  <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Paytm</span>
                                 </a>
                                 <a 
-                                  href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
-                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                                  href={`googlepay://pay?pa=${encodeURIComponent(upiIdToUse)}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                  className="flex flex-col items-center gap-1.5 p-3 bg-zinc-900/50 border border-zinc-800 rounded-2xl hover:border-emerald-500 transition-all group"
                                 >
                                   <img src="https://img.icons8.com/color/48/google-pay.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="GPay" />
-                                  <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">G-Pay</span>
+                                  <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">G-Pay</span>
                                 </a>
                               </div>
                               <a 
-                                href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
+                                href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(upiIdToUse)}&pn=${encodeURIComponent(activeMerchantName)}&am=${totalAmount}&cu=INR`}
                                 className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-emerald-500/30"
                               >
                                 <ExternalLink className="w-4 h-4" />
                                 Open Payment App
                               </a>
 
-                              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between group">
+                              <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-between group">
                                 <div className="flex flex-col items-start text-left">
-                                  <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">UPI ID</span>
-                                  <span className="text-[11px] font-bold text-zinc-900 truncate max-w-[150px]">{globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}</span>
+                                  <span className="text-[8px] font-black text-zinc-505 uppercase tracking-widest">UPI ID</span>
+                                  <span className="text-[11px] font-bold text-zinc-200 truncate max-w-[150px]">{upiIdToUse}</span>
                                 </div>
                                 <button 
                                   type="button"
                                   onClick={() => {
-                                    navigator.clipboard.writeText(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+                                    navigator.clipboard.writeText(upiIdToUse);
                                     setMessage({ type: 'success', text: 'UPI ID Copied!' });
                                   }}
-                                  className="p-2 bg-white rounded-lg border border-zinc-200 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500 transition-all shadow-sm"
+                                  className="p-2 bg-zinc-800 rounded-lg border border-zinc-700 text-zinc-400 hover:text-emerald-500 hover:border-emerald-500 transition-all shadow-sm"
                                 >
                                   <Copy className="w-3.5 h-3.5" />
                                 </button>
@@ -621,7 +772,6 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                               placeholder="0000 0000 0000"
                               className="w-full bg-zinc-900 border-2 border-zinc-800 rounded-2xl px-6 py-5 text-white font-black text-lg focus:outline-none focus:border-emerald-500 transition-all tracking-[0.2em] placeholder:text-zinc-800"
                               maxLength={12}
-                              required={paymentMethod === 'upi'}
                             />
                             <div className="absolute right-4 top-1/2 -translate-y-1/2">
                               <ShieldCheck className={`w-6 h-6 transition-colors ${utr.length === 12 ? 'text-emerald-500' : 'text-zinc-800'}`} />
@@ -637,7 +787,6 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                                 onChange={handleScreenshotChange}
                                 className="hidden"
                                 id="purchase-screenshot-upload"
-                                required={paymentMethod === 'upi'}
                               />
                               <label 
                                 htmlFor="purchase-screenshot-upload"
@@ -682,23 +831,9 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                           Initializing...
                         </>
                       ) : (
-                        'Confirm & Pay'
+                        'Confirm & Play'
                       )}
                     </button>
-                  </div>
-                ) : clientSecret ? (
-                  <div className="bg-white p-6 rounded-3xl">
-                    <StripePayment 
-                      clientSecret={clientSecret}
-                      amount={selectedNumbers.length * investment}
-                      onSuccess={() => {
-                        setMessage({ type: 'success', text: 'Numbers purchased successfully!' });
-                        setSelectedNumbers([]);
-                        setShowPayment(false);
-                        setClientSecret(null);
-                      }}
-                      onCancel={() => setClientSecret(null)}
-                    />
                   </div>
                 ) : (
                   <RazorpayPayment
@@ -709,6 +844,7 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
                       fullName: userData.fullName,
                       phoneNumber: userData.phoneNumber,
                     }}
+                    keyId={globalSettings?.upiSettings?.razorpayId}
                     onSuccess={() => {
                       setMessage({ type: 'success', text: 'Numbers purchased successfully!' });
                       setSelectedNumbers([]);

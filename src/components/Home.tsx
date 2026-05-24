@@ -19,7 +19,7 @@ export default function Home({ onNavigate }: HomeProps) {
       <div className="bg-zinc-900 rounded-3xl p-6 text-white overflow-hidden relative">
         <div className="relative z-10">
           <h2 className="text-zinc-400 text-xs font-bold uppercase tracking-widest mb-1">Current Jackpot</h2>
-          <div className="text-4xl font-bold mb-4">$1,250,000</div>
+          <div className="text-4xl font-bold mb-4">₹1,25,00,000</div>
           <button 
             onClick={() => onNavigate('buy')}
             className="bg-white text-zinc-900 px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-zinc-100 transition-colors"
@@ -58,9 +58,9 @@ export default function Home({ onNavigate }: HomeProps) {
         <h3 className="font-bold mb-3 text-sm uppercase tracking-wider text-zinc-400">Recent Winners</h3>
         <div className="space-y-3">
           {[
-            { name: 'Alex H.', prize: '$50,000', time: '2h ago' },
-            { name: 'Sarah M.', prize: '$1,200', time: '5h ago' },
-            { name: 'John D.', prize: '$10,000', time: '1d ago' },
+            { name: 'Rahul S.', prize: '₹5,000', time: '2h ago' },
+            { name: 'Anjali K.', prize: '₹1,200', time: '5h ago' },
+            { name: 'Sameer P.', prize: '₹10,000', time: '1d ago' },
           ].map((winner, i) => (
             <div key={i} className="flex justify-between items-center text-sm">
               <div className="flex items-center gap-2">

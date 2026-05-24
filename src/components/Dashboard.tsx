@@ -56,7 +56,7 @@ export default function Dashboard({ userData, onNavigate }: DashboardProps) {
           <div className="relative z-10">
             <div className="flex justify-between items-start mb-6">
               <div className="space-y-1">
-                <span className="text-zinc-500 font-bold text-[10px] uppercase tracking-[0.2em]">Portfolio Balance</span>
+                <span className="text-zinc-500 font-bold text-[10px] uppercase tracking-[0.2em]">Total Wallet Balance</span>
                 <div className="flex items-baseline gap-2">
                   <span className="text-4xl font-black tracking-tighter font-display">₹{userData.balance.toLocaleString()}</span>
                   <span className="text-emerald-500 font-bold text-xs">INR</span>

@@ -9,17 +9,18 @@ interface RazorpayPaymentProps {
     fullName: string;
     phoneNumber: string;
   };
+  keyId?: string;
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export default function RazorpayPayment({ orderId, amount, userData, onSuccess, onCancel }: RazorpayPaymentProps) {
+export default function RazorpayPayment({ orderId, amount, userData, keyId, onSuccess, onCancel }: RazorpayPaymentProps) {
   const { Razorpay } = useRazorpay();
 
   useEffect(() => {
     const handlePayment = async () => {
       const options: any = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || '',
+        key: keyId || import.meta.env.VITE_RAZORPAY_KEY_ID || '',
         amount: Math.round(amount * 100),
         currency: 'INR',
         name: 'GrandLuck Pro',

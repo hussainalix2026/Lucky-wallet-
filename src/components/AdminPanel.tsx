@@ -58,10 +58,13 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   });
   const [upiSettings, setUpiSettings] = useState({
     upiId: 'razorpay.me/@grantlucky137',
-    paymentLink: 'https://rzp.io/rzp/s8ouvl69'
+    paymentLink: 'https://rzp.io/rzp/s8ouvl69',
+    razorpayId: '',
+    razorpayQrCodePhoto: ''
   });
   const [depositSettings, setDepositSettings] = useState({
     manualPaymentLink: '',
+    qrCodePhoto: '',
     bankDetails: {
       bankName: 'HDFC Bank',
       accountHolder: 'GrandLuck Pro Services',
@@ -71,7 +74,8 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
     walletIds: {
       mobikwik: '9876543210',
       freecharge: '9876543210'
-    }
+    },
+    manualUpiList: [] as string[]
   });
 
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -115,20 +119,37 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
       if (snap.exists()) {
         const data = snap.data();
         if (data.withdrawalLimits) {
-          setWithdrawalLimits(data.withdrawalLimits);
+          setWithdrawalLimits(prev => ({ ...prev, ...data.withdrawalLimits }));
         }
         if (data.referralBonus) {
-          setReferralBonus(data.referralBonus);
+          setReferralBonus(prev => ({ ...prev, ...data.referralBonus }));
         }
         if (data.upiSettings) {
-          setUpiSettings(data.upiSettings);
+          setUpiSettings(prev => ({
+            ...prev,
+            ...data.upiSettings,
+            upiId: data.upiSettings.upiId || '',
+            paymentLink: data.upiSettings.paymentLink || '',
+            razorpayId: data.upiSettings.razorpayId || '',
+            razorpayQrCodePhoto: data.upiSettings.razorpayQrCodePhoto || ''
+          }));
         }
         if (data.depositSettings) {
           setDepositSettings(prev => ({
             ...prev,
             ...data.depositSettings,
-            bankDetails: { ...prev.bankDetails, ...data.depositSettings.bankDetails },
-            walletIds: { ...prev.walletIds, ...data.depositSettings.walletIds }
+            bankDetails: {
+              bankName: data.depositSettings.bankDetails?.bankName || '',
+              accountHolder: data.depositSettings.bankDetails?.accountHolder || '',
+              accountNumber: data.depositSettings.bankDetails?.accountNumber || '',
+              ifscCode: data.depositSettings.bankDetails?.ifscCode || ''
+            },
+            walletIds: {
+              mobikwik: data.depositSettings.walletIds?.mobikwik || '',
+              freecharge: data.depositSettings.walletIds?.freecharge || ''
+            },
+            qrCodePhoto: data.depositSettings.qrCodePhoto || '',
+            manualUpiList: data.depositSettings.manualUpiList || []
           }));
         }
       }
@@ -914,24 +935,91 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
                         <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest ml-1">This link will be used to generate the QR code for UPI deposits.</p>
                       </div>
 
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Static QR Code URL / Photo URL</label>
+                        <input 
+                          type="text"
+                          value={depositSettings.qrCodePhoto}
+                          onChange={(e) => setDepositSettings({...depositSettings, qrCodePhoto: e.target.value})}
+                          placeholder="https://example.com/qr.png"
+                          className="w-full bg-zinc-50 border-zinc-100 border-2 rounded-2xl py-4 px-6 focus:border-emerald-500 focus:ring-0 transition-all font-black text-lg"
+                        />
+                        <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest ml-1">If provided, this image will be shown instead of generating a QR from the link.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Manual UPI IDs (Comma separated)</label>
+                        <textarea 
+                          value={depositSettings.manualUpiList.join(', ')}
+                          onChange={(e) => setDepositSettings({...depositSettings, manualUpiList: e.target.value.split(',').map(s => s.trim()).filter(s => s)})}
+                          placeholder="upi1@okaxis, upi2@okhdfc"
+                          className="w-full bg-zinc-50 border-zinc-100 border-2 rounded-2xl py-4 px-6 focus:border-emerald-500 focus:ring-0 transition-all font-black text-lg h-24"
+                        />
+                        <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest ml-1">Different UPI IDs that will be shown to users one by one or as options.</p>
+                      </div>
+
+                      <div className="space-y-4 mb-6">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Deposit QR Code Photo</label>
+                        <div className="flex flex-col gap-4 bg-zinc-50 p-6 rounded-3xl border-2 border-dashed border-zinc-100">
+                          {depositSettings.qrCodePhoto && (
+                            <div className="relative w-40 h-40 mx-auto bg-white p-2 rounded-2xl border border-zinc-200">
+                              <img src={depositSettings.qrCodePhoto} alt="Admin QR" className="w-full h-full object-contain" />
+                              <button 
+                                type="button"
+                                onClick={() => setDepositSettings({...depositSettings, qrCodePhoto: ''})}
+                                className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-colors"
+                              >
+                                <XCircle className="w-5 h-5" />
+                              </button>
+                            </div>
+                          )}
+                          <div className="text-center">
+                            <input 
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setDepositSettings({...depositSettings, qrCodePhoto: reader.result as string});
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                              className="hidden"
+                              id="qr-upload-admin"
+                            />
+                            <label 
+                              htmlFor="qr-upload-admin"
+                              className="inline-flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest cursor-pointer hover:bg-zinc-800 transition-all"
+                            >
+                              <Camera className="w-4 h-4" />
+                              {depositSettings.qrCodePhoto ? 'Change Photo' : 'Upload QR Photo'}
+                            </label>
+                            <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest mt-2">Recommended: Square image, max 500KB</p>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="bg-zinc-50 p-6 rounded-3xl border border-zinc-100 space-y-4">
                         <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Bank Deposit Details</p>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Bank Name</label>
-                            <input type="text" value={depositSettings.bankDetails.bankName} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, bankName: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.bankDetails?.bankName || ''} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, bankName: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">A/C Holder</label>
-                            <input type="text" value={depositSettings.bankDetails.accountHolder} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountHolder: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.bankDetails?.accountHolder || ''} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountHolder: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">A/C Number</label>
-                            <input type="text" value={depositSettings.bankDetails.accountNumber} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountNumber: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.bankDetails?.accountNumber || ''} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, accountNumber: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">IFSC Code</label>
-                            <input type="text" value={depositSettings.bankDetails.ifscCode} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, ifscCode: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.bankDetails?.ifscCode || ''} onChange={e => setDepositSettings({...depositSettings, bankDetails: {...depositSettings.bankDetails, ifscCode: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                         </div>
                       </div>
@@ -941,11 +1029,11 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Mobikwik</label>
-                            <input type="text" value={depositSettings.walletIds.mobikwik} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, mobikwik: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.walletIds?.mobikwik || ''} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, mobikwik: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                           <div className="space-y-1">
                             <label className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Freecharge</label>
-                            <input type="text" value={depositSettings.walletIds.freecharge} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, freecharge: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
+                            <input type="text" value={depositSettings.walletIds?.freecharge || ''} onChange={e => setDepositSettings({...depositSettings, walletIds: {...depositSettings.walletIds, freecharge: e.target.value}})} className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2 text-xs font-bold" />
                           </div>
                         </div>
                       </div>
@@ -965,15 +1053,68 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
                         />
                       </div>
                       <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Razorpay Payment ID / Key</label>
+                        <input 
+                          type="text"
+                          value={upiSettings.razorpayId || ''}
+                          onChange={(e) => setUpiSettings({...upiSettings, razorpayId: e.target.value})}
+                          placeholder="rzp_live_..."
+                          className="w-full bg-zinc-50 border-zinc-100 border-2 rounded-2xl py-4 px-6 focus:border-blue-500 focus:ring-0 transition-all font-black text-lg"
+                        />
+                      </div>
+                      <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Payment Link (HTTPS)</label>
                         <input 
                           type="text"
-                          value={upiSettings.paymentLink}
+                          value={upiSettings.paymentLink || ''}
                           onChange={(e) => setUpiSettings({...upiSettings, paymentLink: e.target.value})}
                           placeholder="e.g. https://razorpay.me/@username"
                           className="w-full bg-zinc-50 border-zinc-100 border-2 rounded-2xl py-4 px-6 focus:border-blue-500 focus:ring-0 transition-all font-black text-lg"
                         />
                         <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest ml-1">Direct link for users to pay. Used to generate QR code.</p>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Razorpay Custom UPI QR Code Photo</label>
+                        <div className="flex flex-col gap-4 bg-zinc-50 p-6 rounded-3xl border-2 border-dashed border-zinc-100">
+                          {upiSettings.razorpayQrCodePhoto && (
+                            <div className="relative w-40 h-40 mx-auto bg-white p-2 rounded-2xl border border-zinc-200">
+                              <img src={upiSettings.razorpayQrCodePhoto} alt="Admin Razorpay QR" className="w-full h-full object-contain" />
+                              <button 
+                                type="button"
+                                onClick={() => setUpiSettings({...upiSettings, razorpayQrCodePhoto: ''})}
+                                className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-colors"
+                              >
+                                <XCircle className="w-5 h-5" />
+                              </button>
+                            </div>
+                          )}
+                          <div className="text-center">
+                            <input 
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setUpiSettings({...upiSettings, razorpayQrCodePhoto: reader.result as string});
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                              className="hidden"
+                              id="razorpay-qr-upload-admin"
+                            />
+                            <label 
+                              htmlFor="razorpay-qr-upload-admin"
+                              className="inline-flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest cursor-pointer hover:bg-zinc-800 transition-all font-display"
+                            >
+                              <Camera className="w-4 h-4" />
+                              {upiSettings.razorpayQrCodePhoto ? 'Change QR Photo' : 'Upload Razorpay QR Photo'}
+                            </label>
+                            <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest mt-2">Recommended: Save scan QR code image, max 500KB</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

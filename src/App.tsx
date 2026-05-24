@@ -100,6 +100,7 @@ export interface UserData {
   referredBy?: string;
   referralCount: number;
   hasReceivedReferralBonus?: boolean;
+  paymentQrCode?: string | null;
   bankDetails?: {
     accountHolderName: string;
     accountNumber: string;
@@ -247,7 +248,7 @@ export default function App() {
         />
       );
       case 'verification': return <PaymentVerification userData={userData} onBack={() => setCurrentView('dashboard')} />;
-      case 'receive': return <ReceivePayment userData={userData} onBack={() => setCurrentView('verification')} onViewHistory={() => setCurrentView('purchases')} />;
+      case 'receive': return <ReceivePayment userData={userData} onBack={() => setCurrentView('dashboard')} onViewHistory={() => setCurrentView('purchases')} />;
       case 'ludo': return (
         <LudoGame 
           userData={userData} 

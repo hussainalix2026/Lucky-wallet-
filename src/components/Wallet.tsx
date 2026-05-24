@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, query, where, orderBy, onSnapshot, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, addDoc, doc, updateDoc, writeBatch, increment } from 'firebase/firestore';
 import { UserData } from '../App';
-import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Plus, History, ChevronLeft, CreditCard, Landmark, Send, AlertCircle, CheckCircle2, Clock, Trophy, Loader2, ShieldCheck, ExternalLink, QrCode, Sparkles, Copy } from 'lucide-react';
+import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Plus, History, ChevronLeft, CreditCard, Landmark, Send, AlertCircle, CheckCircle2, Clock, Trophy, Loader2, ShieldCheck, ExternalLink, QrCode, Sparkles, Copy, Smartphone, Coins, HelpCircle, RefreshCw, Headphones, FileText, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import StripePayment from './StripePayment';
 import RazorpayPayment from './RazorpayPayment';
+import RazorpayQRCard from './RazorpayQRCard';
 
 interface WalletProps {
   userData: UserData | null;
@@ -40,8 +41,13 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
   const [depositAmount, setDepositAmount] = useState('');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [razorpayOrder, setRazorpayOrder] = useState<any | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'razorpay' | 'upi'>('upi');
+  const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'upi'>('upi');
   const [activeMerchantName, setActiveMerchantName] = useState('Digital Services');
+
+  const [depositStep, setDepositStep] = useState(1);
+  const [depositTab, setDepositTab] = useState<'online' | 'crypto'>('online');
+  const [selectedChannel, setSelectedChannel] = useState<'upi' | 'ptm' | 'upay' | 'nowallet'>('upi');
+  const [selectedPill, setSelectedPill] = useState<'upi98' | 'upi90'>('upi98');
 
   const merchantNames = [
     'Digital Services', 'Fast Checkout', 'Global Payments', 'Reliable Pay',
@@ -52,15 +58,101 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
   ];
 
   useEffect(() => {
-    const randomName = merchantNames[Math.floor(Math.random() * merchantNames.length)];
-    setActiveMerchantName(randomName);
+    if (showDeposit) {
+      const randomName = merchantNames[Math.floor(Math.random() * merchantNames.length)];
+      setActiveMerchantName(randomName);
+      setDepositStep(1);
+      setDepositTab('online');
+      setSelectedChannel('upi');
+      setSelectedPill('upi98');
+      setDepositAmount('');
+      setUtr('');
+      setScreenshot(null);
+    }
   }, [showDeposit]); // Change every time deposit modal is opened
   const [utr, setUtr] = useState('');
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedManualUpi, setSelectedManualUpi] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [isDepositSubmitted, setIsDepositSubmitted] = useState(false);
+
+  const handleSimulateSuccess = async (simulatedUtr: string, mockBase64Screenshot: string, autoApprove: boolean) => {
+    setUtr(simulatedUtr);
+    setScreenshot(mockBase64Screenshot);
+    
+    if (autoApprove && userData && depositAmount) {
+      setLoading(true);
+      try {
+        const batch = writeBatch(db);
+        const amountNum = parseFloat(depositAmount);
+
+        // 1. Create successful transaction
+        const txRef = doc(collection(db, 'transactions'));
+        batch.set(txRef, {
+          uid: userData.uid,
+          amount: amountNum,
+          type: 'Deposit',
+          status: 'Success', 
+          utr: simulatedUtr,
+          screenshot: mockBase64Screenshot,
+          paymentMethod: paymentMethod === 'razorpay' ? 'Razorpay QR' : 'Manual UPI',
+          createdAt: new Date().toISOString()
+        });
+
+        // 2. Increment user balance
+        const userRef = doc(db, 'users', userData.uid);
+        batch.update(userRef, {
+          balance: increment(amountNum)
+        });
+
+        await batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, 'simulate-wallet-deposit'));
+
+        setMessage({ type: 'success', text: `UPI Sandbox Success! ₹${depositAmount} instantly credited to your wallet.` });
+        setDepositAmount('');
+        setShowDeposit(false);
+        setUtr('');
+        setScreenshot(null);
+      } catch (err) {
+        console.error(err);
+        setMessage({ type: 'error', text: 'Failed to process instant sandbox credit.' });
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setMessage({ type: 'success', text: 'Payment response simulated! Tap Claim Deposit below to process manually.' });
+    }
+  };
+
+  const manualUpiList = globalSettings?.depositSettings?.manualUpiList || [];
+  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+  
+  const presetLinks: { [key: number]: string } = {
+    100: 'https://rzp.io/i/SsF0Uw13YJijrv',
+    200: 'https://rzp.io/i/SsEy3bJmlrPtif',
+    500: 'https://rzp.io/i/SsEzCnIbr8zWSQ',
+    1000: 'https://rzp.io/i/SsEwOE8Zivg42L',
+  };
+
+  const getActivePaymentLink = () => {
+    const amt = parseFloat(depositAmount);
+    if (!isNaN(amt) && presetLinks[amt]) {
+      return presetLinks[amt];
+    }
+    return globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/s8ouvl69';
+  };
+
+  const isManualRazorpay = paymentMethod === 'razorpay' && (
+    (!globalSettings?.upiSettings?.razorpayId || globalSettings?.upiSettings?.razorpayQrCodePhoto) ||
+    (!isNaN(parseFloat(depositAmount)) && !!presetLinks[parseFloat(depositAmount)])
+  );
+
+  useEffect(() => {
+    if (manualUpiList.length > 0 && !selectedManualUpi) {
+      setSelectedManualUpi(manualUpiList[0]);
+    }
+  }, [manualUpiList, paymentMethod]);
 
   const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -199,6 +291,67 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
     }
   };
 
+  const handleAmountPresetClick = async (amount: number) => {
+    if (!userData) {
+      setMessage({ type: 'error', text: 'Please log in to make a deposit.' });
+      return;
+    }
+    setDepositAmount(amount.toString());
+    setPaymentMethod('razorpay');
+    
+    const directLink = presetLinks[amount];
+    if (directLink) {
+      setDepositStep(2);
+      try {
+        window.open(directLink, '_blank');
+        setMessage({ type: 'success', text: `Opening ₹${amount} Razorpay Payment Link...` });
+      } catch (e) {
+        console.log("Popup blocked:", e);
+        setMessage({ type: 'info', text: `Popup blocked. Click 'Open in Payment App' below.` });
+      }
+      return;
+    }
+
+    const hasRazorpayKeys = !!globalSettings?.upiSettings?.razorpayId;
+    const hasRazorpayQr = !!globalSettings?.upiSettings?.razorpayQrCodePhoto;
+
+    if (hasRazorpayKeys && !hasRazorpayQr) {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/razorpay/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: amount,
+            uid: userData.uid,
+            type: 'deposit',
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to create Razorpay order');
+        const data = await response.json();
+        setRazorpayOrder(data);
+      } catch (err) {
+        console.error(err);
+        setMessage({ type: 'error', text: 'Error initiating Razorpay checkout.' });
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Direct jump to Step 2 to complete manual checkout or paylink
+      setDepositStep(2);
+      
+      const pLink = globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/s8ouvl69';
+      if (pLink.startsWith('http')) {
+        try {
+          window.open(pLink + `?amount=${amount}`, '_blank');
+        } catch (e) {
+          console.log("Popup blocked:", e);
+        }
+      }
+    }
+  };
+
   const handleDepositRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userData || !depositAmount) return;
@@ -220,6 +373,40 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
         const data = await response.json();
         setClientSecret(data.clientSecret);
       } else if (paymentMethod === 'razorpay') {
+        const hasRazorpayKeys = !!globalSettings?.upiSettings?.razorpayId;
+        const hasRazorpayQr = !!globalSettings?.upiSettings?.razorpayQrCodePhoto;
+
+        if (!hasRazorpayKeys || hasRazorpayQr) {
+          if (!utr) {
+            setMessage({ type: 'error', text: 'Please enter Transaction ID (UTR).' });
+            setLoading(false);
+            return;
+          }
+          if (!screenshot) {
+            setMessage({ type: 'error', text: 'Please upload a payment screenshot as proof.' });
+            setLoading(false);
+            return;
+          }
+
+          await addDoc(collection(db, 'transactions'), {
+            uid: userData.uid,
+            amount: parseFloat(depositAmount),
+            type: 'Deposit',
+            status: 'Pending',
+            utr,
+            screenshot,
+            paymentMethod: 'Razorpay QR',
+            createdAt: new Date().toISOString()
+          }).catch(err => handleFirestoreError(err, OperationType.WRITE, 'transactions'));
+
+          setMessage({ type: 'success', text: 'Deposit request submitted! Admin will verify and credit your balance.' });
+          setDepositAmount('');
+          setShowDeposit(false);
+          setUtr('');
+          setScreenshot(null);
+          return;
+        }
+
         const response = await fetch('/api/razorpay/create-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -236,6 +423,12 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
       } else if (paymentMethod === 'upi') {
         if (!utr) {
           setMessage({ type: 'error', text: 'Please enter Transaction ID (UTR).' });
+          setLoading(false);
+          return;
+        }
+        if (!screenshot) {
+          setMessage({ type: 'error', text: 'Please upload a payment screenshot as proof.' });
+          setLoading(false);
           return;
         }
         
@@ -250,11 +443,11 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
           createdAt: new Date().toISOString(),
         }).catch(err => handleFirestoreError(err, OperationType.WRITE, 'transactions'));
 
-        setMessage({ type: 'success', text: 'Deposit request submitted! Admin will verify and update your balance.' });
-        setShowDeposit(false);
-        setDepositAmount('');
-        setUtr('');
-        setScreenshot(null);
+          setMessage({ type: 'success', text: 'Deposit request submitted! Admin will verify and update your balance.' });
+          setShowDeposit(false);
+          setDepositAmount('');
+          setUtr('');
+          setScreenshot(null);
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Failed to initialize payment.' });
@@ -335,27 +528,36 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
               <motion.div 
                 initial={{ x: -20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
+                whileHover={{ scale: 1.015, y: -2 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
                 key={tx.id} 
-                className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden group hover:bg-zinc-800 transition-all"
+                className={`bg-zinc-900 rounded-2xl border transition-all duration-300 overflow-hidden group ${
+                  expandedTxId === tx.id ? 'ring-2 ring-zinc-700/50' : ''
+                } ${
+                  tx.type === 'Deposit' ? 'border-zinc-800/80 hover:border-emerald-500/30 hover:shadow-lg hover:shadow-emerald-500/5' : 
+                  tx.type === 'Winning' ? 'border-zinc-800/80 hover:border-blue-500/30 hover:shadow-lg hover:shadow-blue-500/5' : 
+                  tx.type === 'Referral Bonus' ? 'border-zinc-800/80 hover:border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/5' :
+                  'border-zinc-800/80 hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/5'
+                }`}
               >
                 <div 
                   onClick={() => setExpandedTxId(expandedTxId === tx.id ? null : tx.id)}
-                  className="p-4 flex items-center justify-between cursor-pointer"
+                  className="p-4 flex items-center justify-between cursor-pointer select-none"
                 >
                   <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
-                      tx.type === 'Deposit' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 
-                      tx.type === 'Winning' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 
-                      tx.type === 'Referral Bonus' ? 'bg-purple-500/10 text-purple-500 border-purple-500/20' :
-                      'bg-orange-500/10 text-orange-500 border-orange-500/20'
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-300 ${
+                      tx.type === 'Deposit' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 group-hover:bg-emerald-500/20' : 
+                      tx.type === 'Winning' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20 group-hover:bg-blue-500/20' : 
+                      tx.type === 'Referral Bonus' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 group-hover:bg-purple-500/20' :
+                      'bg-orange-500/10 text-orange-400 border-orange-500/20 group-hover:bg-orange-500/20'
                     }`}>
-                      {tx.type === 'Deposit' ? <ArrowDownLeft className="w-6 h-6" /> : 
-                       tx.type === 'Winning' ? <Trophy className="w-6 h-6" /> : 
-                       tx.type === 'Referral Bonus' ? <Sparkles className="w-6 h-6" /> :
-                       <ArrowUpRight className="w-6 h-6" />}
+                      {tx.type === 'Deposit' ? <ArrowDownLeft className="w-5 h-5" /> : 
+                       tx.type === 'Winning' ? <Trophy className="w-5 h-5" /> : 
+                       tx.type === 'Referral Bonus' ? <Sparkles className="w-5 h-5" /> :
+                       <ArrowUpRight className="w-5 h-5" />}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-black text-white text-sm tracking-tight">{tx.type}</p>
                         {tx.paymentMethod && (
                           <span className="text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-zinc-700 flex items-center gap-1">
@@ -373,22 +575,39 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
                         {new Date(tx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`font-black text-sm tracking-tight ${tx.type === 'Withdraw' ? 'text-white' : 'text-emerald-500'}`}>
-                      {tx.type === 'Withdraw' ? '-' : '+'}₹{tx.amount.toLocaleString()}
-                    </p>
-                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
-                      tx.status === 'Success' ? 'bg-emerald-500/10 text-emerald-500' : 
-                      tx.status === 'Pending' ? 'bg-orange-500/10 text-orange-500 animate-pulse' : 
-                      'bg-red-500/10 text-red-500'
-                    }`}>
-                      {tx.status === 'Pending' ? 'Awaiting Approval' : tx.status}
-                    </span>
+                  
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className={`font-black text-sm tracking-tight ${tx.type === 'Withdraw' ? 'text-white' : 'text-emerald-400'}`}>
+                        {tx.type === 'Withdraw' ? '-' : '+'}₹{tx.amount.toLocaleString()}
+                      </p>
+                      
+                      {tx.status === 'Success' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <CheckCircle2 className="w-2 h-2 shrink-0" />
+                          Success
+                        </span>
+                      )}
+                      {tx.status === 'Pending' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                          <Clock className="w-2 h-2 shrink-0 animate-spin [animation-duration:3s]" />
+                          Pending
+                        </span>
+                      )}
+                      {tx.status === 'Rejected' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-red-500/10 text-red-400 border border-red-500/20">
+                          <AlertCircle className="w-2 h-2 shrink-0" />
+                          Rejected
+                        </span>
+                      )}
+                    </div>
+                    
+                    <ChevronDown className={`w-4 h-4 text-zinc-600 transition-transform duration-300 ${expandedTxId === tx.id ? 'rotate-180 text-white' : 'group-hover:text-zinc-400'}`} />
                   </div>
                 </div>
 
@@ -398,58 +617,64 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="px-4 pb-4 border-t border-zinc-800 pt-4 space-y-3"
+                      className="px-4 pb-4 border-t border-zinc-800 pt-4 space-y-3 bg-zinc-950/40"
                     >
                       {tx.utr && (
-                        <div className="flex justify-between items-center bg-zinc-800/50 p-3 rounded-xl border border-zinc-700">
-                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">UTR Number</span>
-                          <div className="flex items-center gap-2">
-                             <span className="text-xs font-black text-white tracking-wider">{tx.utr}</span>
-                             <button 
-                               onClick={(e) => {
-                                 e.stopPropagation();
-                                 navigator.clipboard.writeText(tx.utr!);
-                                 setMessage({ type: 'success', text: 'UTR Copied!' });
-                               }}
-                               className="p-1 hover:bg-zinc-700 rounded transition-all"
-                             >
-                               <Copy className="w-3 h-3 text-zinc-500" />
-                             </button>
+                        <div className="flex justify-between items-center bg-zinc-900/40 p-3 rounded-xl border border-zinc-800">
+                          <div className="flex flex-col text-left">
+                            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">UTR / Reference</span>
+                            <span className="text-xs font-mono font-black text-zinc-200 tracking-wider mt-0.5">{tx.utr}</span>
                           </div>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (tx.utr) {
+                                navigator.clipboard.writeText(tx.utr);
+                                setMessage({ type: 'success', text: 'UTR Copied!' });
+                              }
+                            }}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg transition-all border border-zinc-700 flex items-center gap-1 text-[9px] font-black uppercase tracking-wider"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copy
+                          </button>
                         </div>
                       )}
                       {tx.bankDetails && tx.type === 'Withdraw' && (
-                        <div className="bg-zinc-800/50 p-4 rounded-xl border border-zinc-700 space-y-2">
-                          <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">Withdrawal Bank Details</p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Holder</p>
-                              <p className="text-[10px] font-black text-white">{tx.bankDetails.accountHolderName}</p>
+                        <div className="bg-zinc-900/40 p-4 rounded-xl border border-zinc-800 space-y-3">
+                          <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-1.5">Withdrawal Destination Bank Details</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-zinc-950/50 p-2 rounded-lg border border-zinc-900">
+                              <p className="text-[7.5px] font-black text-zinc-500 uppercase tracking-widest">Holder Name</p>
+                              <p className="text-[10px] font-black text-zinc-100 uppercase mt-0.5">{tx.bankDetails.accountHolderName}</p>
                             </div>
-                            <div>
-                              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Account</p>
-                              <p className="text-[10px] font-black text-white">{tx.bankDetails.accountNumber}</p>
+                            <div className="bg-zinc-950/50 p-2 rounded-lg border border-zinc-900">
+                              <p className="text-[7.5px] font-black text-zinc-500 uppercase tracking-widest">Account Number</p>
+                              <p className="text-[10px] font-mono font-bold text-zinc-100 mt-0.5">{tx.bankDetails.accountNumber}</p>
                             </div>
-                            <div>
-                              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">IFSC</p>
-                              <p className="text-[10px] font-black text-white">{tx.bankDetails.ifscCode}</p>
+                            <div className="bg-zinc-950/50 p-2 rounded-lg border border-zinc-900">
+                              <p className="text-[7.5px] font-black text-zinc-500 uppercase tracking-widest">IFSC Bank Code</p>
+                              <p className="text-[10px] font-mono font-bold text-zinc-100 uppercase mt-0.5">{tx.bankDetails.ifscCode}</p>
                             </div>
-                            <div>
-                              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">UPI ID</p>
-                              <p className="text-[10px] font-black text-white">{tx.bankDetails.upiId}</p>
+                            <div className="bg-zinc-950/50 p-2 rounded-lg border border-zinc-900">
+                              <p className="text-[7.5px] font-black text-zinc-500 uppercase tracking-widest">UPI ID</p>
+                              <p className="text-[10px] font-black text-zinc-100 mt-0.5">{tx.bankDetails.upiId}</p>
                             </div>
                           </div>
                         </div>
                       )}
                       {tx.reason && tx.status === 'Rejected' && (
-                        <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20">
-                          <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-1">Reason for Rejection</p>
-                          <p className="text-xs font-bold text-red-400">{tx.reason}</p>
+                        <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20 flex gap-2.5 items-start">
+                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Reason for Rejection</p>
+                            <p className="text-xs font-bold text-red-300 mt-0.5">{tx.reason}</p>
+                          </div>
                         </div>
                       )}
-                      <div className="flex justify-between items-center pt-2">
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Transaction ID</span>
-                        <span className="text-[8px] font-mono text-zinc-600">{tx.id}</span>
+                      <div className="flex justify-between items-center pt-2 px-1 text-[8px] font-black uppercase tracking-widest">
+                        <span className="text-zinc-600">Transaction hash ID</span>
+                        <span className="text-zinc-600 font-mono tracking-tight select-all">{tx.id}</span>
                       </div>
                     </motion.div>
                   )}
@@ -463,183 +688,614 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
       {/* Action Modals */}
       <AnimatePresence>
         {showDeposit && (
-          <Modal title={isDepositSubmitted ? "Deposit Pending" : "Add Money"} onClose={() => { setShowDeposit(false); setClientSecret(null); setRazorpayOrder(null); setIsDepositSubmitted(false); }}>
-            {isDepositSubmitted ? (
-              <div className="flex flex-col items-center gap-6 py-8 text-center">
-                <div className="w-20 h-20 bg-emerald-500/10 rounded-[2.5rem] flex items-center justify-center border-4 border-emerald-500/20 shadow-2xl shadow-emerald-500/10">
-                  <Clock className="w-10 h-10 text-emerald-500 animate-pulse" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-white tracking-tight">Request Submitted!</h3>
-                  <p className="text-zinc-500 text-sm font-medium px-4">
-                    Our admin team is verifying your payment. Your balance will be updated automatically within 15-30 minutes.
-                  </p>
-                </div>
-                <div className="w-full bg-zinc-900 border border-zinc-800 p-4 rounded-3xl space-y-3">
-                  <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest">
-                    <span className="text-zinc-500">Status</span>
-                    <span className="text-orange-500">Verifying</span>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/80 backdrop-blur-md p-0 sm:p-4">
+            <motion.div 
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              className="relative w-full h-full sm:h-[90vh] max-w-md bg-[#f4f5f8] rounded-none sm:rounded-[2.5rem] flex flex-col overflow-hidden text-zinc-900 shadow-2xl font-sans"
+            >
+              {isDepositSubmitted ? (
+                /* High fidelity Pending request page */
+                <div className="flex-1 flex flex-col bg-white">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-zinc-100 flex-shrink-0">
+                    <button 
+                      onClick={() => { setShowDeposit(false); setIsDepositSubmitted(false); }}
+                      className="p-2 -ml-2 text-zinc-600 hover:text-zinc-900 transition-colors"
+                    >
+                      <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
+                    </button>
+                    <h2 className="text-lg font-black text-zinc-800 tracking-tight font-display">Deposit Status</h2>
+                    <div className="w-10 h-10" /> {/* Spacer */}
                   </div>
-                  <div className="h-px bg-zinc-800" />
-                  <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                    <span>Est. Time</span>
-                    <span className="text-white">~20 Mins</span>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => { setShowDeposit(false); setIsDepositSubmitted(false); }}
-                  className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest border border-zinc-700 hover:bg-zinc-700 transition-all"
-                >
-                  Done
-                </button>
-              </div>
-            ) : !clientSecret && !razorpayOrder ? (
-              <form onSubmit={handleDepositRequest} className="space-y-6">
-                <div className="bg-zinc-800/50 p-6 rounded-3xl border border-dashed border-zinc-700 flex flex-col items-center gap-4 mb-6">
-                  <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
-                    <CreditCard className="w-8 h-8 text-emerald-500" />
-                  </div>
-                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest text-center">Secure deposit via {paymentMethod === 'stripe' ? 'Stripe' : paymentMethod === 'razorpay' ? 'Razorpay' : 'Manual UPI'}</p>
-                </div>
-
-                <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('upi')}
-                    className={`flex-1 min-w-[100px] py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${paymentMethod === 'upi' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}
-                  >
-                    Manual UPI
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('razorpay')}
-                    className={`flex-1 min-w-[100px] py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${paymentMethod === 'razorpay' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}
-                  >
-                    Razorpay
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('stripe')}
-                    className={`flex-1 min-w-[100px] py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${paymentMethod === 'stripe' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}
-                  >
-                    Stripe
-                  </button>
-                </div>
-
-                {paymentMethod === 'upi' && depositAmount && (
-                  <div className="bg-white p-6 rounded-[2.5rem] mb-6 flex flex-col items-center gap-6 shadow-xl border border-zinc-100 ring-4 ring-emerald-500/10">
-                    <div className="w-full flex justify-between items-center px-2">
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/UPI-Logo.png" className="h-4 object-contain opacity-70" alt="UPI" />
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/BHIM_logo.png" className="h-5 object-contain opacity-70" alt="BHIM" />
+                  
+                  {/* Body */}
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
+                    <div className="w-24 h-24 bg-emerald-50 rounded-[3rem] flex items-center justify-center border-4 border-emerald-100 shadow-xl">
+                      <Clock className="w-12 h-12 text-emerald-500 animate-pulse" />
                     </div>
-
-                    <div className="relative group p-4 bg-zinc-50 rounded-3xl border border-zinc-100">
-                      <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}&pn=${activeMerchantName}&am=${depositAmount}&cu=INR`)}`}
-                        alt="Payment QR Code"
-                        className="w-48 h-48 relative z-10 p-2 bg-white rounded-2xl shadow-sm"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center opacity-10">
-                        <QrCode className="w-20 h-20 text-emerald-500" />
+                    <div className="space-y-2">
+                      <h3 className="text-2xl font-black text-zinc-800 tracking-tight leading-none">Request Submitted!</h3>
+                      <p className="text-zinc-500 text-sm font-medium px-4 leading-relaxed">
+                        Our admin verification team is checking your payment. It will be credited within 15-30 minutes.
+                      </p>
+                    </div>
+                    
+                    <div className="w-full bg-zinc-50 border border-zinc-100 p-6 rounded-3xl space-y-4 shadow-sm">
+                      <div className="flex justify-between items-center text-xs font-black uppercase tracking-wider">
+                        <span className="text-zinc-400">Status</span>
+                        <span className="text-amber-600 font-bold bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">Verifying</span>
+                      </div>
+                      <div className="h-px bg-zinc-200/50" />
+                      <div className="flex justify-between items-center text-xs font-black uppercase tracking-wider text-zinc-400">
+                        <span>Est. Processing Time</span>
+                        <span className="text-zinc-800 font-extrabold bg-zinc-100 px-2.5 py-1 rounded-full">~15-30 mins</span>
                       </div>
                     </div>
                     
-                    <div className="text-center space-y-4 w-full">
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] animate-pulse">Scan & Pay with any UPI App</p>
-                        <div className="flex items-center justify-center gap-2">
-                          <p className="text-3xl font-black text-zinc-900 tracking-tighter">₹{depositAmount}</p>
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(depositAmount);
-                              setMessage({ type: 'success', text: 'Amount Copied!' });
-                            }}
-                            className="p-1.5 bg-zinc-50 rounded-lg border border-zinc-100 text-zinc-400 hover:text-emerald-500 transition-all"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
-                        </div>
-                        <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">To: <span className="text-emerald-600">{activeMerchantName}</span></p>
-                      </div>
-
-                      <div className="h-px bg-zinc-100 w-full" />
-
-                      <div className="flex flex-col gap-3">
-                        <div className="grid grid-cols-3 gap-2">
-                          <a 
-                            href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
-                            className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
-                          >
-                            <img src="https://img.icons8.com/color/48/phone-pe.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="PhonePe" />
-                            <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">PhonePe</span>
-                          </a>
-                          <a 
-                            href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
-                            className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
-                          >
-                            <img src="https://img.icons8.com/color/48/paytm.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="Paytm" />
-                            <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Paytm</span>
-                          </a>
-                          <a 
-                            href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
-                            className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
-                          >
-                            <img src="https://img.icons8.com/color/48/google-pay.png" className="w-8 h-8 grayscale group-hover:grayscale-0 transition-all" alt="GPay" />
-                            <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">G-Pay</span>
-                          </a>
-                        </div>
-                        <a 
-                          href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
-                          className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-emerald-500/30"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          Open in Payment App
-                        </a>
-
-                        <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between group">
-                          <div className="flex flex-col items-start">
-                            <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">UPI ID</span>
-                            <span className="text-[11px] font-bold text-zinc-900">{globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69'}</span>
-                          </div>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
-                              setMessage({ type: 'success', text: 'UPI ID Copied!' });
-                            }}
-                            className="p-2 bg-white rounded-lg border border-zinc-200 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500 transition-all shadow-sm"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 justify-center py-2 px-4 bg-yellow-50 rounded-xl border border-yellow-100">
-                        <AlertCircle className="w-3.5 h-3.5 text-yellow-600" />
-                        <p className="text-[9px] font-bold text-yellow-700 uppercase tracking-tight text-left">Upload screenshot of transaction below</p>
-                      </div>
-                    </div>
+                    <button 
+                      onClick={() => { setShowDeposit(false); setIsDepositSubmitted(false); }}
+                      className="w-full bg-zinc-900 hover:bg-zinc-800 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                    >
+                      Got it
+                    </button>
                   </div>
-                )}
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Amount (₹)</label>
-                    <div className="relative">
-                      <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-emerald-500">₹</span>
-                      <input 
-                        type="number"
-                        value={depositAmount}
-                        onChange={(e) => setDepositAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full bg-zinc-800/50 border-zinc-700 border-2 rounded-2xl py-5 pl-12 pr-6 focus:border-emerald-500 focus:ring-0 transition-all font-black text-2xl text-white font-display"
-                        required
+                </div>
+              ) : clientSecret ? (
+                /* Stripe wrapper code inside white container */
+                <div className="flex-1 flex flex-col bg-white">
+                  <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-zinc-100 flex-shrink-0">
+                    <button onClick={() => setClientSecret(null)} className="p-2 -ml-2 text-zinc-600 hover:text-zinc-900">
+                      <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
+                    </button>
+                    <h2 className="text-lg font-black text-zinc-800 tracking-tight font-display">Stripe Checkout</h2>
+                    <div className="w-10 h-10" />
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-6 bg-[#f4f5f8]">
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-100">
+                      <StripePayment 
+                        clientSecret={clientSecret}
+                        amount={parseFloat(depositAmount)}
+                        onSuccess={() => {
+                          setMessage({ type: 'success', text: 'Payment successful! Balance will be updated shortly.' });
+                          setShowDeposit(false);
+                          setClientSecret(null);
+                          setDepositAmount('');
+                        }}
+                        onCancel={() => setClientSecret(null)}
                       />
                     </div>
                   </div>
+                </div>
+              ) : razorpayOrder ? (
+                /* Razorpay checker */
+                <div className="flex-1 flex flex-col bg-white">
+                  <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-zinc-100 flex-shrink-0">
+                    <button onClick={() => setRazorpayOrder(null)} className="p-2 -ml-2 text-zinc-600 hover:text-zinc-900">
+                      <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
+                    </button>
+                    <h2 className="text-lg font-black text-zinc-800 tracking-tight font-display">Razorpay Payment</h2>
+                    <div className="w-10 h-10" />
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
+                    <RazorpayPayment
+                      orderId={razorpayOrder.id}
+                      amount={parseFloat(depositAmount)}
+                      userData={{
+                        uid: userData.uid,
+                        fullName: userData.fullName,
+                        phoneNumber: userData.phoneNumber,
+                      }}
+                      keyId={globalSettings?.upiSettings?.razorpayId}
+                      onSuccess={() => {
+                        setMessage({ type: 'success', text: 'Payment successful! Balance will be updated shortly.' });
+                        setShowDeposit(false);
+                        setRazorpayOrder(null);
+                        setDepositAmount('');
+                      }}
+                      onCancel={() => setRazorpayOrder(null)}
+                    />
+                  </div>
+                </div>
+              ) : depositStep === 1 ? (
+                /* FIRST STEP: SELECT AMOUNT & CHANNELS (MATCHES SCREENSHOT SPECIFICALLY) */
+                <form className="flex-1 flex flex-col overflow-hidden bg-white" onSubmit={(e) => e.preventDefault()}>
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-zinc-100 flex-shrink-0">
+                    <button 
+                      type="button"
+                      onClick={() => setShowDeposit(false)} 
+                      className="p-2 -ml-2 text-zinc-600 hover:text-zinc-900 active:scale-95 transition-all"
+                    >
+                      <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
+                    </button>
+                    
+                    <h2 className="text-[#13151b] text-lg font-black tracking-tight font-display">Deposit</h2>
+                    
+                    <div className="flex items-center">
+                      <button 
+                        type="button"
+                        onClick={() => setMessage({ type: 'info', text: 'Head over to Settings -> Support or contact admin for help.' })}
+                        className="p-2 text-zinc-600 hover:text-zinc-900 active:scale-95 transition-all"
+                      >
+                        <Headphones className="w-5 h-5 stroke-[2]" />
+                      </button>
+                      
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setShowDeposit(false);
+                          setTimeout(() => {
+                            const elem = document.getElementById("transaction-history-section");
+                            if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+                          }, 100);
+                        }}
+                        className="p-2 text-zinc-600 hover:text-zinc-900 relative active:scale-95 transition-all"
+                      >
+                        <FileText className="w-5 h-5 stroke-[2]" />
+                        <span className="absolute top-0 right-0 w-5 h-5 bg-[#ff3b30] text-white text-[8px] font-black flex items-center justify-center rounded-full border border-white scale-90 ring-1 ring-red-500/20">
+                          99+
+                        </span>
+                      </button>
+                    </div>
+                  </div>
 
-                  {paymentMethod === 'upi' && (
+                  {/* Body (Scrollable) */}
+                  <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-[#f4f5f8]">
+                    
+                    {/* Payment Method Header */}
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center px-1">
+                        <span className="text-xs font-black text-zinc-500 uppercase tracking-widest">Payment method</span>
+                        <div className="flex items-center gap-1.5 bg-white border border-zinc-200/50 py-1.5 px-3 rounded-full shadow-sm">
+                          <span className="text-xs">🇮🇳</span>
+                          <span className="text-xs font-black text-[#fca93b]">{(userData?.balance || 0).toFixed(2)}</span>
+                          <button 
+                            type="button"
+                            onClick={() => setMessage({ type: 'success', text: 'Wallet balance refreshed!' })}
+                            className="p-0.5 text-zinc-400 hover:text-zinc-700 transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Online Deposit / Crypto tabs */}
+                      <div className="flex gap-4 border-b border-zinc-200">
+                        <button 
+                          type="button"
+                          onClick={() => setDepositTab('online')}
+                          className={`relative flex-1 pb-3 text-center transition-all ${depositTab === 'online' ? 'text-zinc-900 font-extrabold border-b-[3px] border-zinc-900' : 'text-zinc-400 font-bold'}`}
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            <Smartphone className="w-4 h-4 text-zinc-700 font-black" />
+                            <span className="text-xs font-bold">Online deposit</span>
+                          </div>
+                          {/* +4% Badges */}
+                          <div className="absolute -top-3.5 right-0 bg-red-500 text-white font-black text-[7px] px-1.5 py-0.5 rounded-full shadow-md flex items-center gap-0.5">
+                            <span>🎁</span>
+                            <span>+4%</span>
+                          </div>
+                        </button>
+
+                        <button 
+                          type="button"
+                          onClick={() => setMessage({ type: 'info', text: 'Cryptocurrency payment networks are undergoing maintenance.' })}
+                          className="relative flex-1 pb-3 text-center transition-all opacity-60 text-zinc-400 font-bold font-sans"
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            <Coins className="w-4 h-4 text-amber-500 font-black" />
+                            <span className="text-xs font-bold">Cryptocurrency</span>
+                          </div>
+                          <div className="absolute -top-3.5 right-4 bg-[#ff9500] text-white font-black text-[7px] px-1.5 py-0.5 rounded-full shadow-md flex items-center gap-0.5">
+                            <span>🎁</span>
+                            <span>+2%</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Channels Selector Grid */}
+                    <div className="grid grid-cols-2 gap-3 pb-2">
+                      {/* UPI */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod('upi');
+                          setSelectedChannel('upi');
+                        }}
+                        className={`relative flex items-center gap-3 p-4 bg-white rounded-2xl border-2 transition-all text-left ${
+                          selectedChannel === 'upi'
+                            ? 'border-zinc-800 shadow-md bg-zinc-50/20'
+                            : 'border-zinc-100 shadow-sm hover:border-zinc-200'
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-sm font-black text-emerald-600">
+                          🛆
+                        </div>
+                        <span className="text-xs font-black text-zinc-800 uppercase tracking-wider">UPI</span>
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#fd3d39] text-white font-black text-[7px] px-1.5 py-0.5 rounded-md scale-90 border border-white">
+                          2.5%
+                        </div>
+                      </button>
+
+                      {/* PTM */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod('razorpay');
+                          setSelectedChannel('ptm');
+                        }}
+                        className={`relative flex items-center gap-3 p-4 bg-white rounded-2xl border-2 transition-all text-left ${
+                          selectedChannel === 'ptm'
+                            ? 'border-zinc-800 shadow-md bg-zinc-50/20'
+                            : 'border-zinc-100 shadow-sm hover:border-zinc-200'
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-sm font-black text-blue-600">
+                          🔸
+                        </div>
+                        <span className="text-xs font-black text-zinc-800 uppercase tracking-wider">PTM</span>
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#fd3d39] text-white font-black text-[7px] px-1.5 py-0.5 rounded-md scale-90 border border-white">
+                          2.5%
+                        </div>
+                      </button>
+
+                      {/* UPAY Wallet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod('upi');
+                          setSelectedChannel('upay');
+                        }}
+                        className={`relative flex items-center gap-3 p-4 bg-white rounded-2xl border-2 transition-all text-left ${
+                          selectedChannel === 'upay'
+                            ? 'border-zinc-800 shadow-md bg-zinc-50/20'
+                            : 'border-zinc-100 shadow-sm hover:border-zinc-200'
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center text-xs font-black text-purple-600">
+                          💼
+                        </div>
+                        <span className="text-xs font-black text-zinc-800 uppercase tracking-wider">UPAY Wallet</span>
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#fd3d39] text-white font-black text-[7px] px-1.5 py-0.5 rounded-md scale-90 border border-white">
+                          2%
+                        </div>
+                      </button>
+
+                      {/* NO Wallet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod('upi');
+                          setSelectedChannel('nowallet');
+                        }}
+                        className={`relative flex items-center gap-3 p-4 bg-white rounded-2xl border-2 transition-all text-left ${
+                          selectedChannel === 'nowallet'
+                            ? 'border-zinc-800 shadow-md bg-zinc-50/20'
+                            : 'border-zinc-100 shadow-sm hover:border-zinc-200'
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center text-xs font-black text-cyan-600">
+                          🧬
+                        </div>
+                        <span className="text-xs font-black text-zinc-800 uppercase tracking-wider">NO wallet</span>
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#fd3d39] text-white font-black text-[7px] px-1.5 py-0.5 rounded-md scale-90 border border-white">
+                          2.5%
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Sub Channels Pills */}
+                    <div className="flex gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPill('upi98')}
+                        className={`px-6 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest border transition-all ${
+                          selectedPill === 'upi98'
+                            ? 'bg-white border-zinc-800 text-zinc-900 shadow-sm'
+                            : 'bg-white border-zinc-100 text-zinc-400 hover:border-zinc-200'
+                        }`}
+                      >
+                        UPI.98
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPill('upi90')}
+                        className={`px-6 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest border transition-all ${
+                          selectedPill === 'upi90'
+                            ? 'bg-white border-zinc-800 text-zinc-900 shadow-sm'
+                            : 'bg-white border-zinc-100 text-zinc-400 hover:border-zinc-200'
+                        }`}
+                      >
+                        UPI.90
+                      </button>
+                    </div>
+
+                    <div className="h-px bg-zinc-200/50" />
+
+                    {/* PRESETS ENTRY HEADER */}
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center px-1">
+                        <span className="text-xs font-black text-zinc-500 uppercase tracking-widest">Deposit amount</span>
+                        <button 
+                          type="button"
+                          onClick={() => setMessage({ type: 'info', text: 'Claim instant matching sports bonuses on selected amounts!' })}
+                          className="text-[10px] font-black text-zinc-400 hover:text-zinc-600 transition-colors uppercase tracking-wider flex items-center gap-1 font-sans"
+                        >
+                          Bonus event explanation
+                          <HelpCircle className="w-3.5 h-3.5 stroke-[2]" />
+                        </button>
+                      </div>
+
+                      {/* Presets Grid */}
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { id: 1, amt: 100, bonus: 1.00, label: 'Option 1' },
+                          { id: 2, amt: 200, bonus: 2.00, label: 'Option 2' },
+                          { id: 3, amt: 500, bonus: 5.00, label: 'Option 3' },
+                          { id: 4, amt: 1000, bonus: 10.00, label: 'Option 4' },
+                        ].map((item) => {
+                          const isActive = parseFloat(depositAmount) === item.amt;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => handleAmountPresetClick(item.amt)}
+                              className={`flex flex-col text-left p-3.5 rounded-2xl border-2 transition-all relative overflow-hidden group ${
+                                isActive 
+                                  ? 'border-emerald-500 bg-emerald-50/40 shadow-sm ring-1 ring-emerald-500/15 scale-[1.02]' 
+                                  : 'border-zinc-100 bg-white hover:border-zinc-200 shadow-sm hover:scale-[1.01]'
+                              }`}
+                            >
+                              <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${
+                                isActive ? 'text-emerald-600' : 'text-zinc-400 font-sans'
+                              }`}>
+                                {item.label}
+                              </span>
+                              <span className="text-xl font-black text-zinc-950 mt-1 tracking-tight">
+                                ₹{item.amt.toLocaleString()}
+                              </span>
+                              <div className={`mt-2.5 inline-flex self-start px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${
+                                isActive ? 'bg-emerald-500/10 text-emerald-600' : 'bg-[#fff9e5] text-[#c09930]'
+                              }`}>
+                                Bonus +₹{item.bonus.toFixed(0)}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Custom input */}
+                      <div className="relative">
+                        <div className="absolute left-5 top-1/2 -translate-y-1/2 flex items-center text-lg font-black text-zinc-800">
+                          <span>₹</span>
+                        </div>
+                        <input 
+                          type="number"
+                          value={depositAmount}
+                          onChange={(e) => setDepositAmount(e.target.value)}
+                          placeholder="Min 100~Max 50,000"
+                          className="w-full bg-[#fef6f6] border border-[#ffe0e0] rounded-2xl py-4.5 pl-10 pr-6 focus:border-red-400 focus:ring-0 transition-all font-black text-base text-zinc-800 font-display shadow-inner"
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Button */}
+                  <div className="p-5 bg-white border-t border-zinc-100 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const amt = parseFloat(depositAmount);
+                        if (!amt || amt < 100 || amt > 50000) {
+                          setMessage({ type: 'error', text: 'Transaction amount must be between ₹100 and ₹50,000.' });
+                          return;
+                        }
+                        // Advance to Step 2
+                        setDepositStep(2);
+                      }}
+                      className={`w-full py-4.5 rounded-2xl text-[13px] font-black uppercase tracking-widest transition-all ${
+                        parseFloat(depositAmount) >= 100
+                          ? 'bg-[#131313] text-white shadow-xl hover:bg-zinc-800 active:scale-95'
+                          : 'bg-[#bebdbd] text-[#e3e3e3] cursor-not-allowed'
+                      }`}
+                    >
+                      Deposit Now
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* STEP 2: COMPLETE PAYMENT SCAN QR CODE & ENTER UTR SCREENSHOT PROOF */
+                <form className="flex-1 flex flex-col overflow-hidden bg-white" onSubmit={handleDepositRequest}>
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-zinc-100 flex-shrink-0">
+                    <button 
+                      type="button"
+                      onClick={() => setDepositStep(1)} 
+                      className="p-2 -ml-2 text-zinc-600 hover:text-zinc-900 active:scale-95 transition-all"
+                    >
+                      <ChevronLeft className="w-6 h-6 stroke-[3]" />
+                    </button>
+                    <h2 className="text-lg font-black text-zinc-800 tracking-tight font-display">Scan & Paste UTR</h2>
+                    <div className="w-10 h-10" />
+                  </div>
+
+                  {/* Body (Scrollable) */}
+                  <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-[#f4f5f8]">
+                    
+                    {/* Security Badge Alert */}
+                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-emerald-100/50 flex items-center justify-center flex-shrink-0">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <p className="text-[10px] text-emerald-800 leading-normal font-bold uppercase tracking-wide">
+                        Secure INR Deposit via {paymentMethod === 'razorpay' ? 'Razorpay QR' : (selectedChannel === 'upi' ? 'Manual UPI' : 'Wallet Transfer')}
+                      </p>
+                    </div>
+
+                    {/* QR Code Presentation Box */}
+                    {isManualRazorpay ? (
+                      <div className="flex flex-col gap-6">
+                        <RazorpayQRCard 
+                          amount={depositAmount} 
+                          payLink={getActivePaymentLink()} 
+                          merchantName="HUSSAIN ALI"
+                          qrPhotoOverride={globalSettings?.upiSettings?.razorpayQrCodePhoto}
+                          onSimulateSuccess={handleSimulateSuccess}
+                        />
+
+                        {/* Amount & Copy action wrapper */}
+                        <div className="bg-white p-5 rounded-[2rem] shadow-xl border border-zinc-100 flex items-center justify-between px-6">
+                          <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount to Pay</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl font-black text-zinc-900">₹{depositAmount}</span>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(depositAmount);
+                                setMessage({ type: 'success', text: 'Amount Copied!' });
+                              }}
+                              className="p-1.5 bg-zinc-50 rounded-lg border border-zinc-100 text-zinc-400 hover:text-emerald-500 transition-all"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Open link CTA */}
+                        <div className="bg-white p-5 rounded-[2rem] shadow-xl border border-zinc-100 flex flex-col gap-3">
+                          <a 
+                            href={getActivePaymentLink()}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full inline-flex items-center justify-center gap-2.5 py-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-md shadow-blue-500/10"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Open Razorpay Payment Page
+                          </a>
+                          
+                          <div className="flex items-center gap-2 justify-center py-2.5 px-4 bg-yellow-50 rounded-xl border border-yellow-100">
+                            <AlertCircle className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                            <p className="text-[9px] font-bold text-yellow-700 uppercase tracking-tight text-left">Upload screenshot of transaction below</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white p-6 rounded-[2.5rem] flex flex-col items-center gap-6 shadow-xl border border-zinc-100 ring-4 ring-emerald-500/5">
+                        <div className="w-full flex justify-between items-center px-1">
+                          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/UPI-Logo.png" className="h-3.5 object-contain opacity-70" alt="UPI" />
+                          <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/BHIM_logo.png" className="h-4 object-contain opacity-70" alt="BHIM" />
+                        </div>
+
+                        <div className="relative group p-4 bg-zinc-50 rounded-[2rem] border border-zinc-100">
+                          {globalSettings?.depositSettings?.qrCodePhoto ? (
+                            <img 
+                              src={globalSettings.depositSettings.qrCodePhoto}
+                              alt="Payment QR Code"
+                              className="w-44 h-44 relative z-10 p-2 bg-white rounded-2xl shadow-sm object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <img 
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${upiIdToUse}&pn=${activeMerchantName}&am=${depositAmount}&cu=INR`)}`}
+                              alt="Payment QR Code"
+                              className="w-44 h-44 relative z-10 p-2 bg-white rounded-2xl shadow-sm"
+                              referrerPolicy="no-referrer"
+                            />
+                          )}
+                          <div className="absolute inset-0 flex items-center justify-center opacity-[0.03]">
+                            <QrCode className="w-20 h-20 text-emerald-500" />
+                          </div>
+                        </div>
+
+                        {/* Display Amount & Pay with UPI links */}
+                        <div className="text-center space-y-4 w-full">
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.2em] animate-pulse">Scan & Pay with any UPI App</p>
+                            <div className="flex items-center justify-center gap-2">
+                              <p className="text-3xl font-black text-zinc-900 tracking-tighter">₹{depositAmount}</p>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(depositAmount);
+                                  setMessage({ type: 'success', text: 'Amount Copied!' });
+                                }}
+                                className="p-1.5 bg-zinc-50 rounded-lg border border-zinc-100 text-zinc-400 hover:text-emerald-500 transition-all"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest font-sans">To: <span className="text-emerald-600">{activeMerchantName}</span></p>
+                          </div>
+
+                          <div className="h-px bg-zinc-100 w-full" />
+
+                          {/* UPI quick links or Razorpay direct info */}
+                          <div className="flex flex-col gap-3">
+                            <div className="grid grid-cols-3 gap-2">
+                              <a 
+                                href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                              >
+                                <img src="https://img.icons8.com/color/48/phone-pe.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="PhonePe" />
+                                <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">PhonePe</span>
+                              </a>
+                              <a 
+                                href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                              >
+                                <img src="https://img.icons8.com/color/48/paytm.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="Paytm" />
+                                <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Paytm</span>
+                              </a>
+                              <a 
+                                href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                className="flex flex-col items-center gap-1.5 p-3 bg-[#f4f5f8] border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
+                              >
+                                <img src="https://img.icons8.com/color/48/google-pay.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="GPay" />
+                                <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">G-Pay</span>
+                              </a>
+                            </div>
+
+                            <a 
+                              href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full inline-flex items-center justify-center gap-2.5 py-3.5 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/10"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              Open in Payment App
+                            </a>
+
+                            <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between">
+                              <div className="flex flex-col items-start leading-tight">
+                                <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">UPI ID</span>
+                                <span className="text-[10px] font-bold text-zinc-900 truncate max-w-[170px]">{upiIdToUse}</span>
+                              </div>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(upiIdToUse);
+                                  setMessage({ type: 'success', text: 'UPI ID Copied!' });
+                                }}
+                                className="p-1.5 bg-white rounded-lg border border-zinc-200 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500 transition-all shadow-sm"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 justify-center py-2.5 px-4 bg-yellow-50 rounded-xl border border-yellow-100">
+                            <AlertCircle className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                            <p className="text-[9px] font-bold text-yellow-700 uppercase tracking-tight text-left">Upload screenshot of transaction below</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* UTR & Screenshot inputs */}
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Transaction ID (UTR)</label>
@@ -648,8 +1304,9 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                           value={utr}
                           onChange={(e) => setUtr(e.target.value)}
                           placeholder="Enter 12-digit UTR"
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-4 py-4 text-white focus:outline-none focus:border-emerald-500 transition-colors"
-                          required={paymentMethod === 'upi'}
+                          className="w-full bg-white border border-zinc-200 rounded-2xl px-4 py-4 text-zinc-800 font-bold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-sm"
+                          required
+                          maxLength={12}
                         />
                       </div>
                       
@@ -662,79 +1319,49 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                             onChange={handleScreenshotChange}
                             className="hidden"
                             id="screenshot-upload"
-                            required={paymentMethod === 'upi'}
                           />
                           <label 
                             htmlFor="screenshot-upload"
-                            className="w-full bg-zinc-800 border-2 border-dashed border-zinc-700 rounded-2xl p-6 flex flex-col items-center gap-2 cursor-pointer hover:border-emerald-500 transition-all"
+                            className="w-full bg-white border-2 border-dashed border-[#ebebeb] rounded-2xl p-6 flex flex-col items-center gap-2 cursor-pointer hover:border-emerald-500 hover:bg-zinc-50/20 transition-all text-center"
                           >
                             {screenshot ? (
-                              <div className="relative w-full aspect-video rounded-xl overflow-hidden">
+                              <div className="relative w-full aspect-video rounded-xl overflow-hidden shadow-sm">
                                 <img src={screenshot} alt="Screenshot Preview" className="w-full h-full object-cover" />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                  <p className="text-[10px] font-black text-white uppercase tracking-widest">Change Screenshot</p>
+                                  <p className="text-[9px] font-black text-white uppercase tracking-widest">Change Screenshot</p>
                                 </div>
                               </div>
                             ) : (
                               <>
-                                <Plus className="w-8 h-8 text-zinc-600" />
+                                <Plus className="w-8 h-8 text-zinc-400" />
                                 <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Upload Payment Proof</p>
-                                <p className="text-[8px] text-zinc-600 font-bold uppercase">Max size: 1MB</p>
+                                <p className="text-[8px] text-zinc-400 font-bold uppercase">Max size: 1MB</p>
                               </>
                             )}
                           </label>
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black text-lg shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (paymentMethod === 'upi' ? 'Submit for Verification' : 'Continue to Payment')}
-                </button>
-                {paymentMethod === 'upi' && (
-                  <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest text-center mt-2">
-                    <ShieldCheck className="w-3 h-3 inline mr-1 text-emerald-500" />
-                    Admin will verify your payment within 15-30 minutes
-                  </p>
-                )}
-              </form>
-            ) : clientSecret ? (
-              <div className="bg-white p-6 rounded-3xl">
-                <StripePayment 
-                  clientSecret={clientSecret}
-                  amount={parseFloat(depositAmount)}
-                  onSuccess={() => {
-                    setMessage({ type: 'success', text: 'Payment successful! Balance will be updated shortly.' });
-                    setShowDeposit(false);
-                    setClientSecret(null);
-                    setDepositAmount('');
-                  }}
-                  onCancel={() => setClientSecret(null)}
-                />
-              </div>
-            ) : (
-              <RazorpayPayment
-                orderId={razorpayOrder.id}
-                amount={parseFloat(depositAmount)}
-                userData={{
-                  uid: userData.uid,
-                  fullName: userData.fullName,
-                  phoneNumber: userData.phoneNumber,
-                }}
-                onSuccess={() => {
-                  setMessage({ type: 'success', text: 'Payment successful! Balance will be updated shortly.' });
-                  setShowDeposit(false);
-                  setRazorpayOrder(null);
-                  setDepositAmount('');
-                }}
-                onCancel={() => setRazorpayOrder(null)}
-              />
-            )}
-          </Modal>
+                  </div>
+
+                  {/* Submission Row */}
+                  <div className="p-5 bg-white border-t border-zinc-100 flex-shrink-0 space-y-2">
+                    <button 
+                      type="submit"
+                      disabled={loading}
+                      className="w-full bg-[#10b981] text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/10 hover:bg-emerald-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Submit for Verification'}
+                    </button>
+                    <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-widest text-center font-sans">
+                      <ShieldCheck className="w-3 h-3 inline mr-1 text-emerald-500" />
+                      Admin will verify your payment within 15-30 minutes
+                    </p>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
         )}
 
         {showWithdraw && (

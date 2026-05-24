@@ -131,20 +131,22 @@ export default function LudoBoard({
       const next = order[nextIdx];
       
       if (isSpectator) {
-        setMessage(`${next.toUpperCase()}'s Turn (Spectating)`);
+        setMessage(`${next.toUpperCase()}'s Turn...`);
       } else {
         if (next === userColor) {
-          setMessage(`Your Turn (${userColor.toUpperCase()})`);
+          setMessage(`Your Turn!`);
         } else {
-          setMessage(`Waiting for ${next.toUpperCase()}...`);
+          setMessage(`${next.toUpperCase()}'s Turn`);
         }
       }
       setCanRoll(true);
       
-      updateGameState({ currentPlayer: next, diceValue: 1, isRolling: false });
+      if (isHost) {
+        updateGameState({ currentPlayer: next, diceValue: 1, isRolling: false, consecutiveSixes: 0 });
+      }
       return next;
     });
-  }, [playersCount, isSpectator, userColor, updateGameState]);
+  }, [playersCount, isSpectator, userColor, updateGameState, isHost]);
 
   const movePiece = useCallback(async (id: number, val: number) => {
     if (winner || isRolling) return;
@@ -337,41 +339,51 @@ export default function LudoBoard({
     setIsRolling(true);
     setCanRoll(false);
     
-    updateGameState({ isRolling: true });
+    if (gameId) {
+      updateGameState({ isRolling: true, diceValue: 1 });
+    }
     
     // Simulate roll animation
     setTimeout(() => {
       const finalValue = Math.floor(Math.random() * 6) + 1;
       setDiceValue(finalValue);
       setIsRolling(false);
-      updateGameState({ diceValue: finalValue, isRolling: false });
       
+      let nextConsecutiveSixes = 0;
       if (finalValue === 6) {
-        if (consecutiveSixes === 2) {
-          setMessage("3 Sixes In A Row! Turn Lost.");
+        nextConsecutiveSixes = consecutiveSixes + 1;
+        if (nextConsecutiveSixes === 3) {
+          setConsecutiveSixes(0);
+          setMessage("3 Sixes! Turn Lost.");
+          if (gameId) updateGameState({ diceValue: 6, isRolling: false, consecutiveSixes: 0 });
           setTimeout(switchTurn, 1500);
           return;
         }
-        setConsecutiveSixes(prev => prev + 1);
+        setConsecutiveSixes(nextConsecutiveSixes);
       } else {
         setConsecutiveSixes(0);
+      }
+
+      if (gameId) {
+        updateGameState({ diceValue: finalValue, isRolling: false, consecutiveSixes: nextConsecutiveSixes });
       }
       
       checkMovablePieces(finalValue);
     }, 1000);
-  }, [canRoll, isRolling, winner, checkMovablePieces, isSpectator, updateGameState, consecutiveSixes, switchTurn]);
+  }, [canRoll, isRolling, winner, checkMovablePieces, isSpectator, updateGameState, consecutiveSixes, switchTurn, gameId]);
 
-  // Auto-Roll Logic
+  // Auto-Roll Logic - Only the host handles bot rolls or auto-play
   useEffect(() => {
-    if (isSpectator) return;
+    if (isSpectator || !isHost && currentPlayer !== userColor) return;
+    
     const isBotTurn = currentPlayer !== userColor;
-    const shouldAutoRoll = isBotTurn || isAutoPlay;
+    const shouldAutoRoll = (isBotTurn && isHost) || (currentPlayer === userColor && isAutoPlay);
     
     if (shouldAutoRoll && canRoll && !isRolling && !winner) {
-      const timer = setTimeout(rollDice, isBotTurn ? 1500 : 1000);
+      const timer = setTimeout(rollDice, isBotTurn ? 2000 : 1000);
       return () => clearTimeout(timer);
     }
-  }, [currentPlayer, canRoll, isRolling, winner, rollDice, isAutoPlay, isSpectator, userColor]);
+  }, [currentPlayer, canRoll, isRolling, winner, rollDice, isAutoPlay, isSpectator, userColor, isHost]);
 
   const getPieceCoords = (piece: Piece) => {
     if (piece.position === -1) {
@@ -587,7 +599,8 @@ export default function LudoBoard({
           {/* Pieces */}
           {pieces.map(p => {
             const [r, c] = getPieceCoords(p);
-            const isMovable = movablePieces.includes(p.id) && currentPlayer === 'red' && !isSpectator;
+            const isMyTurn = currentPlayer === userColor;
+            const isMovable = movablePieces.includes(p.id) && isMyTurn && !isSpectator;
             const offset = getPieceOffset(p);
             
             const colorGradients = {
