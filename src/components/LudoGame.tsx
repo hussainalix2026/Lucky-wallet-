@@ -9,10 +9,11 @@ import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, 
 interface LudoGameProps {
   userData: UserData | null;
   onBack: () => void;
+  onNavigate?: (view: string) => void;
   adminGameConfig?: { id: string, mode: 'player' | 'spectator' } | null;
 }
 
-export default function LudoGame({ userData, onBack, adminGameConfig }: LudoGameProps) {
+export default function LudoGame({ userData, onBack, onNavigate, adminGameConfig }: LudoGameProps) {
   const [activeTab, setActiveTab] = useState<'play' | 'rules' | 'history'>('play');
   const [gameStarted, setGameStarted] = useState(false);
   const [selectedMode, setSelectedMode] = useState<any>(null);
@@ -342,7 +343,21 @@ export default function LudoGame({ userData, onBack, adminGameConfig }: LudoGame
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Available Balance</p>
             <p className="text-2xl font-black text-white tracking-tight">₹{userData?.balance.toLocaleString()}</p>
           </div>
-          <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20">
+          <button 
+            onClick={() => {
+              try {
+                window.open('https://rzp.io/rzp/XFu2lI2v', '_blank');
+              } catch (err) {
+                console.log('Window open blocked:', err);
+              }
+              if (onNavigate) {
+                onNavigate('receive');
+              } else {
+                onBack();
+              }
+            }}
+            className="bg-emerald-500 hover:bg-emerald-600 transition-all text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95"
+          >
             Add Cash
           </button>
         </div>

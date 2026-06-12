@@ -256,6 +256,7 @@ export default function App() {
             setCurrentView('dashboard');
             setSelectedLudoGame(null);
           }} 
+          onNavigate={setCurrentView}
           adminGameConfig={selectedLudoGame}
         />
       );

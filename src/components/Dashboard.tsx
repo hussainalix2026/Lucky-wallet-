@@ -69,7 +69,15 @@ export default function Dashboard({ userData, onNavigate }: DashboardProps) {
             
             <div className="flex gap-3">
               <button 
-                onClick={(e) => { e.stopPropagation(); onNavigate('wallet'); }}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  try {
+                    window.open('https://rzp.io/rzp/XFu2lI2v', '_blank');
+                  } catch (err) {
+                    console.log('Window open blocked:', err);
+                  }
+                  onNavigate('receive'); 
+                }}
                 className="flex-1 bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
               >
                 <Plus className="w-5 h-5" />

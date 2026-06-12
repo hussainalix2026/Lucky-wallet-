@@ -40,7 +40,7 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
   const [activeMerchantName, setActiveMerchantName] = useState('Digital Services');
 
   const manualUpiList = globalSettings?.depositSettings?.manualUpiList || [];
-  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v');
   const isManualRazorpay = paymentMethod === 'razorpay' && (!globalSettings?.upiSettings?.razorpayId || globalSettings?.upiSettings?.razorpayQrCodePhoto);
 
   React.useEffect(() => {

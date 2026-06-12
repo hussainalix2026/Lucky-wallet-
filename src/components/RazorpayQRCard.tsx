@@ -274,20 +274,25 @@ export default function RazorpayQRCard({
           <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/UPI-Logo.png" className="h-3.5 object-contain" alt="UPI" />
         </div>
 
-        {/* Generative or Override QR Stage */}
-        <div className="p-3 bg-white rounded-[1.5rem] border border-slate-100 shadow-md flex items-center justify-center relative group">
-          <img 
-            src={qrCodeUrl}
-            alt="Payment QR"
-            className="w-40 h-40 sm:w-44 sm:h-44 object-contain rounded-lg"
-            referrerPolicy="no-referrer"
-          />
+        {/* Razorpay Gateway Display Box instead of QR */}
+        <div className="w-full py-6 px-4 bg-[#f8fafc] rounded-2xl border border-slate-100 flex flex-col items-center justify-center gap-2 relative group text-center">
+          <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-1">
+            <Sparkles className="w-6 h-6 animate-pulse" />
+          </div>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Selected Deposit Amount</span>
+          <span className="text-3xl font-black text-slate-800 font-display">₹{amount || '100'}</span>
         </div>
 
-        {/* SCAN & PAY INSTRUCTION */}
-        <p className="text-[9px] font-black text-[#00298a] uppercase tracking-[0.16em] text-center bg-slate-50 px-3 py-1 rounded-full border border-slate-100/50">
-          SCAN & PAY WITH ANY UPI APP
-        </p>
+        {/* Direct Pay Button */}
+        <a 
+          href={payLink || "https://rzp.io/rzp/XFu2lI2v"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <span>Pay via Razorpay</span>
+          <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+        </a>
       </div>
 
       {/* Interactive Payment Sandbox Simulator */}

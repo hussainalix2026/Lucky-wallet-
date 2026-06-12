@@ -58,7 +58,7 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   });
   const [upiSettings, setUpiSettings] = useState({
     upiId: 'razorpay.me/@grantlucky137',
-    paymentLink: 'https://rzp.io/rzp/s8ouvl69',
+    paymentLink: 'https://rzp.io/rzp/XFu2lI2v',
     razorpayId: '',
     razorpayQrCodePhoto: ''
   });

@@ -339,7 +339,7 @@ export default function ReceivePayment({ userData, onBack, onViewHistory }: Rece
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const upiId = globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69';
+  const upiId = globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v';
   const manualUpiList = globalSettings?.depositSettings?.manualUpiList || [];
   const upiIdToUse = (activeTab === 'upi' && selectedManualUpi) ? selectedManualUpi : upiId;
 
@@ -665,10 +665,14 @@ export default function ReceivePayment({ userData, onBack, onViewHistory }: Rece
 
                   <button 
                     onClick={() => handlePayNow()}
-                    className="w-full py-5 bg-emerald-500 text-white rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-emerald-500/20 active:scale-95 transition-all"
+                    className={`w-full py-5 rounded-2xl font-black text-sm uppercase tracking-[0.15em] flex items-center justify-center gap-3 active:scale-95 transition-all shadow-xl ${
+                      isUrl && upiIdToUse.includes('rzp.io') 
+                        ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20' 
+                        : 'bg-emerald-500 text-white hover:bg-emerald-400 shadow-emerald-500/20'
+                    }`}
                   >
-                    {isUrl ? 'Continue to Payment' : 'Pay via All UPI Apps'}
-                    {!isUrl && <ArrowRight className="w-4 h-4" />}
+                    {isUrl && upiIdToUse.includes('rzp.io') ? 'Proceed to Pay on Razorpay' : isUrl ? 'Continue to Payment' : 'Pay via All UPI Apps'}
+                    {isUrl && upiIdToUse.includes('rzp.io') ? <Sparkles className="w-4 h-4 animate-pulse" /> : !isUrl ? <ArrowRight className="w-4 h-4" /> : null}
                   </button>
                 </div>
               </div>

@@ -126,7 +126,7 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
   };
 
   const manualUpiList = globalSettings?.depositSettings?.manualUpiList || [];
-  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69');
+  const upiIdToUse = (paymentMethod === 'upi' && selectedManualUpi) ? selectedManualUpi : (globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v');
   
   const presetLinks: { [key: number]: string } = {
     100: 'https://rzp.io/i/SsF0Uw13YJijrv',
@@ -140,7 +140,7 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
     if (!isNaN(amt) && presetLinks[amt]) {
       return presetLinks[amt];
     }
-    return globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/s8ouvl69';
+    return globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/XFu2lI2v';
   };
 
   const isManualRazorpay = paymentMethod === 'razorpay' && (
@@ -341,7 +341,7 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
       // Direct jump to Step 2 to complete manual checkout or paylink
       setDepositStep(2);
       
-      const pLink = globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/s8ouvl69';
+      const pLink = globalSettings?.upiSettings?.paymentLink || 'https://rzp.io/rzp/XFu2lI2v';
       if (pLink.startsWith('http')) {
         try {
           window.open(pLink + `?amount=${amount}`, '_blank');
@@ -490,7 +490,15 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
 
           <div className="grid grid-cols-2 gap-4 mt-8">
             <button 
-              onClick={() => onNavigate ? onNavigate('receive') : setShowDeposit(true)}
+              onClick={() => {
+                try {
+                  window.open('https://rzp.io/rzp/XFu2lI2v', '_blank');
+                } catch (err) {
+                  console.log('Window open blocked:', err);
+                }
+                if (onNavigate) onNavigate('receive');
+                else setShowDeposit(true);
+              }}
               className="bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
             >
               <Plus className="w-5 h-5" />
@@ -1237,21 +1245,21 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                           <div className="flex flex-col gap-3">
                             <div className="grid grid-cols-3 gap-2">
                               <a 
-                                href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                href={`phonepe://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
                                 className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
                               >
                                 <img src="https://img.icons8.com/color/48/phone-pe.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="PhonePe" />
                                 <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">PhonePe</span>
                               </a>
                               <a 
-                                href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                href={`paytmmp://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
                                 className="flex flex-col items-center gap-1.5 p-3 bg-zinc-50 border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
                               >
                                 <img src="https://img.icons8.com/color/48/paytm.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="Paytm" />
                                 <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Paytm</span>
                               </a>
                               <a 
-                                href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                                href={`googlepay://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
                                 className="flex flex-col items-center gap-1.5 p-3 bg-[#f4f5f8] border border-zinc-100 rounded-2xl hover:border-emerald-500 transition-all group"
                               >
                                 <img src="https://img.icons8.com/color/48/google-pay.png" className="w-7 h-7 grayscale group-hover:grayscale-0 transition-all" alt="GPay" />
@@ -1260,7 +1268,7 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                             </div>
 
                             <a 
-                              href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/s8ouvl69')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
+                              href={globalSettings?.upiSettings?.paymentLink || `upi://pay?pa=${encodeURIComponent(globalSettings?.upiSettings?.upiId || 'rzp.io/rzp/XFu2lI2v')}&pn=${encodeURIComponent(activeMerchantName)}&am=${depositAmount}&cu=INR`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="w-full inline-flex items-center justify-center gap-2.5 py-3.5 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/10"
