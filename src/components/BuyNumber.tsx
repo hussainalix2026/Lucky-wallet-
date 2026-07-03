@@ -169,10 +169,6 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
     if (selectedNumbers.includes(num)) {
       setSelectedNumbers(selectedNumbers.filter(n => n !== num));
     } else {
-      if (selectedNumbers.length >= 10) {
-        setMessage({ type: 'error', text: 'Maximum 10 numbers per ticket' });
-        return;
-      }
       setSelectedNumbers([...selectedNumbers, num]);
     }
   };
@@ -451,13 +447,13 @@ export default function BuyNumber({ userData, onBack, prefillData }: BuyNumberPr
           </h3>
           <div className="flex items-center gap-2">
             <div className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg">
-              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">{selectedNumbers.length}/10</span>
+              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">{selectedNumbers.length} selected</span>
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-5 gap-2 max-h-[320px] overflow-y-auto p-4 bg-zinc-900 rounded-[2rem] border border-zinc-800 shadow-inner custom-scrollbar">
-          {Array.from({ length: 100 }, (_, i) => i + 1).map(num => (
+          {Array.from({ length: 108 }, (_, i) => i + 1).map(num => (
             <button
               key={num}
               onClick={() => toggleNumber(num)}

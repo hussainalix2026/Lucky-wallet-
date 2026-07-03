@@ -235,7 +235,8 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
       const limits = globalSettings.withdrawalLimits;
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay())).toISOString();
+      const tempWeek = new Date(now);
+      const startOfWeek = new Date(tempWeek.setDate(tempWeek.getDate() - tempWeek.getDay())).toISOString();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       const withdraws = transactions.filter(t => t.type === 'Withdraw' && t.status !== 'Rejected');
@@ -245,15 +246,15 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
       const monthlyTotal = withdraws.filter(t => t.createdAt >= startOfMonth).reduce((sum, t) => sum + t.amount, 0);
 
       if (dailyTotal + amount > limits.daily) {
-        setMessage({ type: 'error', text: `Daily withdrawal limit exceeded. Remaining: ₹${limits.daily - dailyTotal}` });
+        setMessage({ type: 'error', text: `Daily withdrawal limit exceeded. Remaining: ₹${Math.max(0, limits.daily - dailyTotal)}` });
         return;
       }
       if (weeklyTotal + amount > limits.weekly) {
-        setMessage({ type: 'error', text: `Weekly withdrawal limit exceeded. Remaining: ₹${limits.weekly - weeklyTotal}` });
+        setMessage({ type: 'error', text: `Weekly withdrawal limit exceeded. Remaining: ₹${Math.max(0, limits.weekly - weeklyTotal)}` });
         return;
       }
       if (monthlyTotal + amount > limits.monthly) {
-        setMessage({ type: 'error', text: `Monthly withdrawal limit exceeded. Remaining: ₹${limits.monthly - monthlyTotal}` });
+        setMessage({ type: 'error', text: `Monthly withdrawal limit exceeded. Remaining: ₹${Math.max(0, limits.monthly - monthlyTotal)}` });
         return;
       }
     }
@@ -824,7 +825,13 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                     <div className="flex items-center">
                       <button 
                         type="button"
-                        onClick={() => setMessage({ type: 'info', text: 'Head over to Settings -> Support or contact admin for help.' })}
+                        onClick={() => {
+                          if (onNavigate) {
+                            onNavigate('verification');
+                          } else {
+                            setMessage({ type: 'info', text: 'Head over to Finance & Support or contact admin for help.' });
+                          }
+                        }}
                         className="p-2 text-zinc-600 hover:text-zinc-900 active:scale-95 transition-all"
                       >
                         <Headphones className="w-5 h-5 stroke-[2]" />
@@ -1483,6 +1490,40 @@ export default function Wallet({ userData, onBack, onNavigate }: WalletProps) {
                       </button>
                     </form>
                   </div>
+
+                  {/* Withdrawal Limits Display */}
+                  {(() => {
+                    if (!globalSettings?.withdrawalLimits) return null;
+                    const limits = globalSettings.withdrawalLimits;
+                    const now = new Date();
+                    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+                    const tempWeek = new Date(now);
+                    const startOfWeek = new Date(tempWeek.setDate(tempWeek.getDate() - tempWeek.getDay())).toISOString();
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+                    const withdraws = transactions.filter(t => t.type === 'Withdraw' && t.status !== 'Rejected');
+                    
+                    const dailyTotal = withdraws.filter(t => t.createdAt >= startOfDay).reduce((sum, t) => sum + t.amount, 0);
+                    const remainingDaily = Math.max(0, limits.daily - dailyTotal);
+
+                    return (
+                      <div className="bg-zinc-800/30 border border-zinc-800 p-4 rounded-2xl space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-zinc-400 font-medium">Daily Withdrawal Limit:</span>
+                          <span className="text-emerald-400 font-bold">₹{remainingDaily.toLocaleString()} / ₹{limits.daily.toLocaleString()} left</span>
+                        </div>
+                        <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-emerald-500 h-full rounded-full transition-all duration-300" 
+                            style={{ width: `${(remainingDaily / limits.daily) * 100}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider text-center mt-1">
+                          You can withdraw daily up to ₹{limits.daily.toLocaleString()} from your wallet balance
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* Withdraw Form */}
                   <form onSubmit={handleWithdrawRequest} className="space-y-4">

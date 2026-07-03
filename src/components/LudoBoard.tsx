@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Play, User, Sparkles, ChevronLeft, Bot } from 'lucide-react';
 import Dice3D from './Dice3D';
+import WinCelebrationOverlay from './WinCelebrationOverlay';
 import { db } from '../firebase';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 
@@ -86,9 +87,16 @@ export default function LudoBoard({
   const [canRoll, setCanRoll] = useState(true);
   const [movablePieces, setMovablePieces] = useState<number[]>([]);
   const [winner, setWinner] = useState<string | null>(null);
+  const [showWinCelebration, setShowWinCelebration] = useState(false);
   const [showEffect, setShowEffect] = useState<{ type: 'capture' | 'finish', x: number, y: number } | null>(null);
   const [isAutoPlay, setIsAutoPlay] = useState(false);
   const [consecutiveSixes, setConsecutiveSixes] = useState(0);
+
+  useEffect(() => {
+    if (winner === 'You') {
+      setShowWinCelebration(true);
+    }
+  }, [winner]);
 
   // Sync with Firestore if gameId exists
   useEffect(() => {
@@ -756,7 +764,7 @@ export default function LudoBoard({
 
       {/* Winner Modal */}
       <AnimatePresence>
-        {winner && (
+        {winner && winner !== 'You' && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -767,13 +775,13 @@ export default function LudoBoard({
               animate={{ scale: 1, y: 0 }}
               className="bg-zinc-900 border border-zinc-800 p-10 rounded-[3rem] text-center space-y-6 max-w-sm w-full shadow-2xl"
             >
-              <div className="w-24 h-24 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto border-2 border-yellow-500/50 animate-pulse">
-                <Trophy className="w-12 h-12 text-yellow-500" />
+              <div className="w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border-2 border-red-500/20">
+                <Trophy className="w-12 h-12 text-zinc-500" />
               </div>
               <div>
                 <h2 className="text-3xl font-black text-white tracking-tight">{winner} Won!</h2>
                 <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs mt-2">
-                  {winner === 'You' ? `Congratulations! ₹${prize.toLocaleString()} added to wallet.` : 'Better luck next time!'}
+                  Better luck next time!
                 </p>
               </div>
               <button 
@@ -786,6 +794,18 @@ export default function LudoBoard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <WinCelebrationOverlay 
+        isOpen={showWinCelebration}
+        onClose={() => {
+          setShowWinCelebration(false);
+          onQuit();
+        }}
+        prizeAmount={prize || 0}
+        gameName="Ludo"
+        customTitle="BOARD CHAMPION!"
+        customSubtext="Congratulations! All of your pieces got home!"
+      />
     </div>
   );
 }

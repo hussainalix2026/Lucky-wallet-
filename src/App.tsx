@@ -13,6 +13,7 @@ import AdminPanel from './components/AdminPanel';
 import PaymentVerification from './components/PaymentVerification';
 import LudoGame from './components/LudoGame';
 import ReceivePayment from './components/ReceivePayment';
+import ColourTrading from './components/ColourTrading';
 import { Wallet as WalletIcon, Ticket, Trophy, History, ShieldCheck, LogOut, Timer, Zap, Sparkles, Camera, Gamepad2, Trophy as TrophyIcon, QrCode } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -87,7 +88,7 @@ async function testConnection() {
 }
 testConnection();
 
-export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo' | 'receive';
+export type View = 'dashboard' | 'wallet' | 'buy' | 'purchases' | 'results' | 'admin' | 'verification' | 'ludo' | 'receive' | 'colour-trading';
 
 export interface UserData {
   uid: string;
@@ -258,6 +259,13 @@ export default function App() {
           }} 
           onNavigate={setCurrentView}
           adminGameConfig={selectedLudoGame}
+        />
+      );
+      case 'colour-trading': return (
+        <ColourTrading 
+          userData={userData} 
+          onBack={() => setCurrentView('dashboard')} 
+          onNavigate={setCurrentView}
         />
       );
       default: return <Dashboard userData={userData} onNavigate={setCurrentView} />;

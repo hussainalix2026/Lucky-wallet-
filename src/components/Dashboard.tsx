@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserData, View } from '../App';
-import { Wallet, Ticket, Trophy, History, Plus, ChevronRight, TrendingUp, ShieldCheck, Zap, Sparkles, ArrowUpRight, Camera, Share2, Copy, CheckCircle2, Gamepad2 } from 'lucide-react';
+import { Wallet, Ticket, Trophy, History, Plus, ChevronRight, TrendingUp, ShieldCheck, Zap, Sparkles, ArrowUpRight, Camera, Share2, Copy, CheckCircle2, Gamepad2, Timer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface DashboardProps {
@@ -132,8 +132,8 @@ export default function Dashboard({ userData, onNavigate }: DashboardProps) {
         <MenuButton 
           onClick={() => onNavigate('verification')}
           icon={<Camera className="w-8 h-8" />}
-          title="Verify Pay"
-          description="Submit Proof"
+          title="Verify Pay / Support"
+          description="Settle Finance Issues"
           color="from-emerald-500 to-teal-600"
           delay={0.5}
         />
@@ -144,6 +144,14 @@ export default function Dashboard({ userData, onNavigate }: DashboardProps) {
           description="Play & Win Cash"
           color="from-red-500 to-orange-600"
           delay={0.6}
+        />
+        <MenuButton 
+          onClick={() => onNavigate('colour-trading')}
+          icon={<Timer className="w-8 h-8" />}
+          title="Colour Trading"
+          description="1 min predictions"
+          color="from-emerald-500 to-emerald-700"
+          delay={0.7}
         />
       </div>
 

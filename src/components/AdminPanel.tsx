@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, getDocs, writeBatch, increment, addDoc, setDoc, getDoc } from 'firebase/firestore';
-import { ShieldCheck, ChevronLeft, CheckCircle2, XCircle, Users, Wallet, Trophy, Clock, AlertCircle, Search, CreditCard, Send, Plus, Settings, Ticket, Copy, Camera, QrCode, Gift, Zap, Landmark, Gamepad2, Trash2, Eye, UserPlus } from 'lucide-react';
+import { ShieldCheck, ChevronLeft, CheckCircle2, XCircle, Users, Wallet, Trophy, Clock, AlertCircle, Search, CreditCard, Send, Plus, Settings, Ticket, Copy, Camera, QrCode, Gift, Zap, Landmark, Gamepad2, Trash2, Eye, UserPlus, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 
@@ -18,6 +18,8 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
   const [pendingWithdraws, setPendingWithdraws] = useState<any[]>([]);
   const [verifications, setVerifications] = useState<any[]>([]);
+  const [financeProblems, setFinanceProblems] = useState<any[]>([]);
+  const [financeProblemAmounts, setFinanceProblemAmounts] = useState<{[key: string]: string}>({});
   const [users, setUsers] = useState<any[]>([]);
   const [purchasedNumbers, setPurchasedNumbers] = useState<any[]>([]);
   const [fantasyMatches, setFantasyMatches] = useState<any[]>([]);
@@ -33,6 +35,7 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   const [winningNumber, setWinningNumber] = useState('');
   const [withdrawUtrs, setWithdrawUtrs] = useState<{[key: string]: string}>({});
+  const [verificationAmounts, setVerificationAmounts] = useState<{[key: string]: string}>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   
@@ -171,6 +174,14 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
       setVerifications(docs);
     }, (err) => handleAdminError(err, 'paymentVerifications'));
 
+    // Finance Problems
+    const qProb = query(collection(db, 'financeProblems'), where('status', '==', 'Pending'));
+    const unsubProb = onSnapshot(qProb, (snap) => {
+      const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      docs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setFinanceProblems(docs);
+    }, (err) => handleAdminError(err, 'financeProblems'));
+
     // Fantasy Matches
     const qFantasyMatches = query(collection(db, 'fantasyMatches'));
     const unsubFantasyMatches = onSnapshot(qFantasyMatches, (snap) => {
@@ -194,7 +205,7 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
       setLudoGames(docs);
     }, (err) => handleAdminError(err, 'ludoGames'));
 
-    return () => { unsubDep(); unsubWit(); unsubUsers(); unsubSettings(); unsubPurchases(); unsubVer(); unsubFantasyMatches(); unsubFantasyPlayers(); unsubLudo(); };
+    return () => { unsubDep(); unsubWit(); unsubUsers(); unsubSettings(); unsubPurchases(); unsubVer(); unsubProb(); unsubFantasyMatches(); unsubFantasyPlayers(); unsubLudo(); };
   }, []);
 
   const handleManualCredit = async (e: React.FormEvent) => {
@@ -363,10 +374,59 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   const handleApproveVerification = async (ver: any) => {
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'paymentVerifications', ver.id), { status: 'Approved' });
-      setMessage({ type: 'success', text: 'Verification approved! Please manually credit the user or activate their ticket based on the proof.' });
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Failed to approve verification.' });
+      const specifiedAmount = verificationAmounts[ver.id];
+      const finalAmount = specifiedAmount !== undefined ? parseFloat(specifiedAmount) : Number(ver.amount || 0);
+
+      if (isNaN(finalAmount) || finalAmount <= 0) {
+        throw new Error('Please enter a valid credit amount greater than 0.');
+      }
+
+      const batch = writeBatch(db);
+      
+      // 1. Update verification document
+      batch.update(doc(db, 'paymentVerifications', ver.id), { 
+        status: 'Approved',
+        approvedAmount: finalAmount,
+        approvedAt: new Date().toISOString()
+      });
+
+      // 2. Increment user balance
+      const userRef = doc(db, 'users', ver.uid);
+      batch.update(userRef, { balance: increment(finalAmount) });
+
+      // 3. Create success transaction
+      const txRef = doc(collection(db, 'transactions'));
+      batch.set(txRef, {
+        uid: ver.uid,
+        amount: finalAmount,
+        type: 'Deposit',
+        status: 'Success',
+        utr: ver.utr,
+        screenshot: ver.screenshot || null,
+        paymentMethod: ver.method === 'upi' ? 'Manual UPI' : (ver.method || 'Manual UPI'),
+        createdAt: new Date().toISOString(),
+        description: `Deposit approved by Admin via verification proof`
+      });
+
+      // 4. If a ticket number / purchase is associated, set it active
+      if (ver.purchaseNumber && ver.purchaseNumber !== 'N/A') {
+        const q = query(collection(db, 'purchasedNumbers'), where('uid', '==', ver.uid), where('status', '==', 'Pending'));
+        const snap = await getDocs(q).catch(() => null);
+        if (snap) {
+          snap.docs.forEach(pDoc => {
+            const pData = pDoc.data();
+            if (pData.utr === ver.utr || pData.ticketNumber === ver.purchaseNumber) {
+              batch.update(pDoc.ref, { status: 'Active' });
+            }
+          });
+        }
+      }
+
+      await batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, 'batch-approve-verification'));
+      setMessage({ type: 'success', text: `Successfully approved! ₹${finalAmount} has been credited to the user's wallet.` });
+    } catch (err: any) {
+      console.error(err);
+      setMessage({ type: 'error', text: err.message || 'Failed to approve verification.' });
     } finally {
       setLoading(false);
     }
@@ -379,6 +439,65 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
       setMessage({ type: 'success', text: 'Verification rejected.' });
     } catch (err) {
       setMessage({ type: 'error', text: 'Failed to reject verification.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResolveFinanceProblem = async (prob: any) => {
+    setLoading(true);
+    try {
+      const specifiedAmountStr = financeProblemAmounts[prob.id];
+      const creditAmt = specifiedAmountStr !== undefined ? parseFloat(specifiedAmountStr) : 0;
+
+      const batch = writeBatch(db);
+
+      // 1. Update problem document status to Resolved
+      batch.update(doc(db, 'financeProblems', prob.id), { 
+        status: 'Resolved',
+        resolvedAmount: creditAmt,
+        resolvedAt: new Date().toISOString()
+      });
+
+      // 2. If a credit amount was specified and is > 0, increment user balance and create deposit transaction
+      if (creditAmt > 0) {
+        const userRef = doc(db, 'users', prob.uid);
+        batch.update(userRef, { balance: increment(creditAmt) });
+
+        const txRef = doc(collection(db, 'transactions'));
+        batch.set(txRef, {
+          uid: prob.uid,
+          amount: creditAmt,
+          type: 'Deposit',
+          status: 'Success',
+          utr: prob.utr || 'N/A',
+          screenshot: prob.screenshot || null,
+          paymentMethod: 'Support Credit',
+          createdAt: new Date().toISOString(),
+          description: `Resolved Support Ticket: Credited ₹${creditAmt} for ${prob.problemType}`
+        });
+      }
+
+      await batch.commit().catch(err => handleFirestoreError(err, OperationType.WRITE, 'batch-resolve-problem'));
+      setMessage({ type: 'success', text: `Finance problem resolved successfully!${creditAmt > 0 ? ` ₹${creditAmt} has been credited to user's wallet.` : ''}` });
+    } catch (err: any) {
+      console.error(err);
+      setMessage({ type: 'error', text: err.message || 'Failed to resolve finance problem.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloseFinanceProblem = async (prob: any) => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'financeProblems', prob.id), { 
+        status: 'Closed',
+        closedAt: new Date().toISOString()
+      });
+      setMessage({ type: 'success', text: 'Finance problem closed without credit.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to close finance problem.' });
     } finally {
       setLoading(false);
     }
@@ -461,7 +580,7 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
   const handleSetResult = async (e: React.FormEvent) => {
     e.preventDefault();
     const num = parseInt(winningNumber);
-    if (isNaN(num) || num < 1 || num > 100) return;
+    if (isNaN(num) || num < 1 || num > 108) return;
 
     setLoading(true);
     try {
@@ -764,52 +883,142 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
           )}
 
           {activeTab === 'verifications' && (
-            <motion.div key="verifications" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-              <h3 className="font-black text-zinc-900 tracking-tight flex items-center gap-2">
-                <Camera className="w-5 h-5 text-emerald-500" />
-                Payment Verifications ({verifications.length})
-              </h3>
-              {verifications.map(ver => (
-                <div key={ver.id} className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">UTR: {ver.utr}</p>
-                      <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">Purchase: {ver.purchaseNumber}</p>
-                      <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">User: {ver.userEmail || ver.uid.slice(0, 8)}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Manual UPI</p>
-                        <QrCode className="w-3 h-3 text-emerald-500" />
+            <motion.div key="verifications" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              {/* Payment Verifications Section */}
+              <div className="space-y-4">
+                <h3 className="font-black text-zinc-900 tracking-tight flex items-center gap-2">
+                  <Camera className="w-5 h-5 text-emerald-500" />
+                  Payment Verifications ({verifications.length})
+                </h3>
+                {verifications.map(ver => (
+                  <div key={ver.id} className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">UTR: {ver.utr}</p>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">Purchase: {ver.purchaseNumber}</p>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">User: {ver.userEmail || ver.uid.slice(0, 8)}</p>
+                        <p className="text-xs font-black text-slate-800 mt-2 flex items-center gap-1.5">
+                          Claimed Amount: <span className="text-emerald-600 font-bold">₹{ver.amount || '0'}</span>
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Manual UPI</p>
+                          <QrCode className="w-3 h-3 text-emerald-500" />
+                        </div>
+                        <button 
+                          onClick={() => setSelectedScreenshot(ver.screenshot)}
+                          className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 text-[8px] font-black uppercase tracking-widest rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                        >
+                          <CreditCard className="w-3 h-3" /> View Proof Screenshot
+                        </button>
                       </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{new Date(ver.createdAt).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+
+                    {/* Input for approved amount to credit */}
+                    <div className="space-y-1 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Approved Amount to Credit (₹)</label>
+                      <input 
+                        type="number"
+                        placeholder="Enter amount to credit user wallet"
+                        className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs font-bold text-zinc-900 focus:outline-none focus:border-emerald-500 transition-colors"
+                        value={verificationAmounts[ver.id] !== undefined ? verificationAmounts[ver.id] : (ver.amount || '')}
+                        onChange={(e) => setVerificationAmounts({...verificationAmounts, [ver.id]: e.target.value})}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <button 
-                        onClick={() => setSelectedScreenshot(ver.screenshot)}
-                        className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 text-[8px] font-black uppercase tracking-widest rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                        onClick={() => handleApproveVerification(ver)}
+                        disabled={loading}
+                        className="bg-emerald-500 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
                       >
-                        <CreditCard className="w-3 h-3" /> View Proof Screenshot
+                        <CheckCircle2 className="w-4 h-4" /> Approve
+                      </button>
+                      <button 
+                        onClick={() => handleRejectVerification(ver)}
+                        disabled={loading}
+                        className="bg-red-50 text-red-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest border border-red-100 flex items-center justify-center gap-2"
+                      >
+                        <XCircle className="w-4 h-4" /> Reject
                       </button>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{new Date(ver.createdAt).toLocaleDateString()}</p>
+                  </div>
+                ))}
+                {verifications.length === 0 && <EmptyState icon={<Camera className="w-12 h-12 text-zinc-300" />} text="No pending verifications" />}
+              </div>
+
+              {/* Finance Problems Section */}
+              <div className="space-y-4 pt-8 border-t border-zinc-200">
+                <h3 className="font-black text-zinc-900 tracking-tight flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  Finance Problems & Issues ({financeProblems.length})
+                </h3>
+                {financeProblems.map(prob => (
+                  <div key={prob.id} className="bg-white p-6 rounded-3xl border border-red-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="px-2.5 py-1 bg-red-50 text-red-600 text-[8px] font-black uppercase tracking-widest rounded-lg border border-red-100">
+                          {prob.problemType}
+                        </span>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-3">UTR/Tx ID: {prob.utr || 'N/A'}</p>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">User Details: {prob.userEmail || prob.uid.slice(0, 8)} ({prob.userPhone})</p>
+                        {prob.amount > 0 && (
+                          <p className="text-xs font-black text-slate-800 mt-2 flex items-center gap-1.5">
+                            Amount Involved: <span className="text-red-600 font-bold">₹{prob.amount}</span>
+                          </p>
+                        )}
+                        <div className="mt-3 bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
+                          <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1">Issue Details</p>
+                          <p className="text-xs font-bold text-zinc-700 leading-relaxed whitespace-pre-wrap">{prob.description}</p>
+                        </div>
+                        {prob.screenshot && (
+                          <button 
+                            onClick={() => setSelectedScreenshot(prob.screenshot)}
+                            className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 text-[8px] font-black uppercase tracking-widest rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                          >
+                            <CreditCard className="w-3 h-3" /> View Attachment / Screenshot
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{new Date(prob.createdAt).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+
+                    {/* Input for approved amount to credit */}
+                    <div className="space-y-1 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Credit Wallet to Resolve (₹) (Optional - Enter 0 to resolve without credit)</label>
+                      <input 
+                        type="number"
+                        placeholder="Enter amount to credit user wallet, e.g. 100"
+                        className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs font-bold text-zinc-900 focus:outline-none focus:border-emerald-500 transition-colors"
+                        value={financeProblemAmounts[prob.id] !== undefined ? financeProblemAmounts[prob.id] : (prob.amount || '0')}
+                        onChange={(e) => setFinanceProblemAmounts({...financeProblemAmounts, [prob.id]: e.target.value})}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => handleResolveFinanceProblem(prob)}
+                        disabled={loading}
+                        className="bg-emerald-500 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Resolve & Credit
+                      </button>
+                      <button 
+                        onClick={() => handleCloseFinanceProblem(prob)}
+                        disabled={loading}
+                        className="bg-zinc-800 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest border border-zinc-700 flex items-center justify-center gap-2"
+                      >
+                        <XCircle className="w-4 h-4" /> Close Ticket
+                      </button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      onClick={() => handleApproveVerification(ver)}
-                      disabled={loading}
-                      className="bg-emerald-500 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Approve
-                    </button>
-                    <button 
-                      onClick={() => handleRejectVerification(ver)}
-                      disabled={loading}
-                      className="bg-red-50 text-red-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest border border-red-100 flex items-center justify-center gap-2"
-                    >
-                      <XCircle className="w-4 h-4" /> Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {verifications.length === 0 && <EmptyState icon={<Camera className="w-12 h-12" />} text="No pending verifications" />}
+                ))}
+                {financeProblems.length === 0 && <EmptyState icon={<AlertTriangle className="w-12 h-12 text-zinc-300" />} text="No pending financial problems" />}
+              </div>
             </motion.div>
           )}
 
@@ -826,7 +1035,7 @@ export default function AdminPanel({ onBack, onSpectateLudo, onJoinLudo }: Admin
 
                 <form onSubmit={handleSetResult} className="space-y-4">
                   <div className="space-y-1 text-center">
-                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Winning Number (1-100)</label>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Winning Number (1-108)</label>
                     <input 
                       type="number"
                       value={winningNumber}

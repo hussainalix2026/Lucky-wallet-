@@ -15,9 +15,10 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
-         request.auth.token.email == "hussainalix2026@gmail.com" ||
-         request.auth.token.email == "8134861236@luckywallet.com");
+        (request.auth.token.email == "hussainalix2026@gmail.com" ||
+         request.auth.token.email == "8134861236@luckywallet.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true));
     }
 
     // ===============================================================
@@ -35,14 +36,14 @@ service cloud.firestore {
 
     // Transactions
     match /transactions/{transactionId} {
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.uid == request.auth.uid);
       allow update: if isAdmin();
     }
 
     // Purchased Numbers
     match /purchasedNumbers/{purchaseId} {
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
       allow update: if isAdmin();
     }
@@ -61,7 +62,14 @@ service cloud.firestore {
 
     // Payment Verifications
     match /paymentVerifications/{verificationId} {
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
+    // Finance Problems
+    match /financeProblems/{problemId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
       allow update: if isAdmin();
     }

@@ -198,6 +198,24 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["matchId", "name", "photo", "role", "team", "credits", "createdAt"]
+    },
+    "FinanceProblem": {
+      "title": "FinanceProblem",
+      "description": "User reported financial problems and issues",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "problemType": { "type": "string", "enum": ["Deposit Not Credited", "Withdrawal Delay / Failure", "Incorrect Wallet Balance", "Double Payment Deduction", "Other Finance Issue"] },
+        "utr": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "screenshot": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Resolved", "Closed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "problemType", "description", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -224,6 +242,10 @@
     "/paymentVerifications/{verificationId}": {
       "schema": "PaymentVerification",
       "description": "Manual payment proof submissions"
+    },
+    "/financeProblems/{problemId}": {
+      "schema": "FinanceProblem",
+      "description": "User reported finance problems"
     },
     "/ludoGames/{gameId}": {
       "schema": "LudoGame",
